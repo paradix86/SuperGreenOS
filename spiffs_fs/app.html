@@ -355,8 +355,7 @@ template {
   display: none;
 }
 
-
-body, html {
+      body, html {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -364,6 +363,71 @@ body, html {
   font-family: "HelveticaNeue-Light", "Helvetica Neue Light", "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif; 
   min-height: 100vh;
   color: #717171;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.app_header {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8pt;
+  padding: 10pt;
+  background-color: #f7f7f7;
+  border-bottom: 1pt solid #ececec;
+}
+
+.header_item {
+  background-color: #ffffff;
+  border: 1pt solid #e7e7e7;
+  border-radius: 5pt;
+  padding: 8pt 10pt;
+}
+
+.header_label {
+  font-size: 0.8em;
+  color: #949494;
+}
+
+.header_value {
+  margin-top: 4pt;
+  font-weight: 700;
+  color: #4a4a4a;
+}
+
+.global_status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8pt;
+  padding: 8pt 10pt;
+  border-bottom: 1pt solid #ececec;
+}
+
+.global_status.error {
+  background-color: #ffecec;
+  color: #9a1c1c;
+}
+
+.global_status.warning {
+  background-color: #fff6e6;
+  color: #8a5a00;
+}
+
+.global_status > button {
+  border: 1pt solid #cfcfcf;
+  background-color: #ffffff;
+  color: inherit;
+  border-radius: 4pt;
+  padding: 4pt 8pt;
+  cursor: pointer;
+}
+
+@media only screen and (max-width: 800px) {
+  .app_header {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
 }
 
 .menu {
@@ -437,6 +501,26 @@ body, html {
   display: block;
   font-weight: 800;
   margin-bottom: 10pt;
+}
+
+.field_actions {
+  display: flex;
+  gap: 8pt;
+  margin-top: 8pt;
+}
+
+.field_actions > button {
+  border: 1pt solid #cfcfcf;
+  background-color: #ffffff;
+  color: #5a5a5a;
+  border-radius: 4pt;
+  padding: 4pt 8pt;
+  cursor: pointer;
+}
+
+.field_actions > button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .loading > .value {
@@ -530,11 +614,97 @@ body, html {
     </style>
   </head>
   <body>
+    <div id='app_header' class='app_header'>
+      <div class='header_item'>
+        <div class='header_label'>Firmware</div>
+        <div id='header_fw_name' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>Build</div>
+        <div id='header_fw_build' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>Wi-Fi</div>
+        <div id='header_wifi_status' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>IP</div>
+        <div id='header_wifi_ip' class='header_value'>-</div>
+      </div>
+    </div>
+    <div id='global_status' class='global_status hidden'>
+      <span id='global_status_message'></span>
+      <button id='global_status_retry' type='button'>Retry</button>
+    </div>
     <div id='body'>
     </div>
     <script>
       const URL = 'http://192.168.1.11'
 const DEBUG = false
+const REQUEST_RETRIES = 3
+
+const globalStatus = {
+  root: null,
+  message: null,
+  retry: null,
+  retryAction: null,
+}
+
+function initGlobalStatus() {
+  globalStatus.root = document.getElementById('global_status')
+  globalStatus.message = document.getElementById('global_status_message')
+  globalStatus.retry = document.getElementById('global_status_retry')
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  globalStatus.retry.addEventListener('click', () => {
+    if (!globalStatus.retryAction) {
+      return
+    }
+    const action = globalStatus.retryAction
+    action()
+  })
+  clearGlobalStatus()
+}
+
+function clearGlobalStatus() {
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  globalStatus.root.setAttribute('class', 'global_status hidden')
+  globalStatus.message.innerText = ''
+  globalStatus.retryAction = null
+  globalStatus.retry.style.display = 'none'
+}
+
+function setGlobalStatus(message, level, retryAction) {
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  const statusLevel = level || 'error'
+  globalStatus.root.setAttribute('class', `global_status ${statusLevel}`)
+  globalStatus.message.innerText = message
+  globalStatus.retryAction = retryAction || null
+  globalStatus.retry.style.display = globalStatus.retryAction ? 'inline-block' : 'none'
+}
+
+function toHttpError(status, responseText, operation) {
+  return {
+    status: status,
+    responseText: responseText,
+    operation: operation,
+  }
+}
+
+function formatHttpError(error) {
+  if (!error) {
+    return 'unknown error'
+  }
+  if (error.status) {
+    return `HTTP ${error.status}`
+  }
+  return 'network error'
+}
 
 const schedule_promise = (n, retries) => {
   let loading_param_promise = Promise.resolve(),
@@ -569,62 +739,110 @@ const schedule_promise = (n, retries) => {
     return p
   }
 }
-const fetchQueue = schedule_promise(3, 3)
+const fetchQueue = schedule_promise(3, REQUEST_RETRIES)
+
+function queueRequest(label, req_func, options) {
+  const opts = options || {}
+  const silent = opts.silent === true
+  return fetchQueue(
+    req_func,
+    (error, attempt) => {
+      if (silent) {
+        return
+      }
+      if (attempt < REQUEST_RETRIES && (!error || error.status !== 404)) {
+        setGlobalStatus(`${label}: retry ${attempt}/${REQUEST_RETRIES}...`, 'warning')
+      }
+    })
+    .then((value) => {
+      if (!silent) {
+        clearGlobalStatus()
+      }
+      return value
+    })
+    .catch((error) => {
+      if (!silent) {
+        const message = `${label} failed (${formatHttpError(error)}).`
+        setGlobalStatus(message, 'error', () => {
+          queueRequest(label, req_func, options).catch(() => {})
+        })
+      }
+      throw error
+    })
+}
 
 const fetchConfig = async function() {
-  return new Promise(function(resolve, reject) {
+  return queueRequest('Loading config', () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('GET', DEBUG ? '/config.json' : '/fs/config.json', true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'fetchConfig'))
         return
       }
-      resolve(JSON.parse(r.responseText))
+      try {
+        resolve(JSON.parse(r.responseText))
+      } catch (e) {
+        reject(toHttpError(r.status, 'invalid json', 'fetchConfig'))
+      }
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'fetchConfig'))
     r.send()
-  })
+  }))
 }
 
-const fetchParam = async function(type, paramName) {
-  return fetchQueue(() => new Promise(function(resolve, reject) {
+const fetchParam = async function(type, paramName, options) {
+  return queueRequest(`Loading ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('GET', `${DEBUG ? URL : ''}/${type}?k=${paramName}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'fetchParam'))
         return
       }
       if (type == 'i') {
-        resolve(parseInt(r.responseText))
+        resolve(parseInt(r.responseText, 10))
       } else {
-        resolve(r.responseText);
+        resolve(r.responseText)
       }
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'fetchParam'))
     r.send()
-  }))
+  }), options)
 }
 
-const updateParam = async function(type, paramName, value) {
-  return fetchQueue(() => new Promise(function(resolve, reject) {
+const updateParam = async function(type, paramName, value, options) {
+  return queueRequest(`Updating ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('POST', `${DEBUG ? URL : ''}/${type}?k=${paramName}&v=${encodeURIComponent(value)}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'updateParam'))
         return
       }
-      resolve(r.responseText);
+      resolve(r.responseText)
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'updateParam'))
     r.send()
-  }))
+  }), options)
 }
 
       let config = {}
 let arrays = {}
+let modules = {}
+let headerTimer = null
+
+const WIFI_STATUS_LABELS = {
+  1: 'Disconnected',
+  2: 'Connecting',
+  3: 'Connected',
+  4: 'Failed',
+  5: 'AP mode',
+}
+const HEADER_REFRESH_MS = 15000
 
 function moduleTitle(text) {
   const title = document.createElement('h3')
@@ -647,8 +865,88 @@ function arrayTitle(text, onShowHide) {
   return body
 }
 
+function parseIntegerValue(rawValue) {
+  const value = `${rawValue}`.trim()
+  if (!/^-?[0-9]+$/.test(value)) {
+    return { valid: false, error: 'Integer expected' }
+  }
+  return { valid: true, value: parseInt(value, 10) }
+}
+
+function normalizeFieldValue(field, rawValue) {
+  if (field.type == 'integer') {
+    return parseIntegerValue(rawValue)
+  }
+  return { valid: true, value: `${rawValue}` }
+}
+
+function findKeyByNameOrCaps(candidates) {
+  return config.keys.find((k) => candidates.indexOf(k.name) >= 0 || candidates.indexOf(k.caps_name) >= 0)
+}
+
+function setHeaderValue(id, value) {
+  const el = document.getElementById(id)
+  if (!el) {
+    return
+  }
+  el.innerText = value
+}
+
+async function refreshHeaderRuntime() {
+  const wifiStatusKey = findKeyByNameOrCaps(['wifi_status', 'WIFI_STATUS'])
+  const wifiIpKey = findKeyByNameOrCaps(['wifi_ip', 'WIFI_IP'])
+  const buildKey = findKeyByNameOrCaps(['ota_timestamp', 'OTA_TIMESTAMP'])
+
+  if (buildKey) {
+    try {
+      const build = await fetchParam(buildKey.type.charAt(0), buildKey.caps_name, { silent: true })
+      setHeaderValue('header_fw_build', `${build}`)
+    } catch (e) {
+      setHeaderValue('header_fw_build', '-')
+    }
+  } else {
+    setHeaderValue('header_fw_build', '-')
+  }
+
+  if (wifiStatusKey) {
+    try {
+      const status = await fetchParam(wifiStatusKey.type.charAt(0), wifiStatusKey.caps_name, { silent: true })
+      setHeaderValue('header_wifi_status', WIFI_STATUS_LABELS[status] || `Unknown (${status})`)
+    } catch (e) {
+      setHeaderValue('header_wifi_status', 'Offline')
+    }
+  } else {
+    setHeaderValue('header_wifi_status', '-')
+  }
+
+  if (wifiIpKey) {
+    try {
+      const ip = await fetchParam(wifiIpKey.type.charAt(0), wifiIpKey.caps_name, { silent: true })
+      setHeaderValue('header_wifi_ip', ip || '-')
+    } catch (e) {
+      setHeaderValue('header_wifi_ip', '-')
+    }
+  } else {
+    setHeaderValue('header_wifi_ip', '-')
+  }
+}
+
+function initHeader() {
+  setHeaderValue('header_fw_name', config.name || '-')
+  if (headerTimer) {
+    clearInterval(headerTimer)
+    headerTimer = null
+  }
+  refreshHeaderRuntime()
+  headerTimer = setInterval(refreshHeaderRuntime, HEADER_REFRESH_MS)
+}
+
 function renderField(title, field) {
   const body = document.createElement('div')
+  const baseClass = field.write ? 'field' : 'field ro'
+  const setStatus = (status) => {
+    body.setAttribute('class', status ? `${baseClass} ${status}` : baseClass)
+  }
 
   const label = document.createElement('label')
   label.innerText = title
@@ -658,69 +956,103 @@ function renderField(title, field) {
   error.setAttribute('class', 'error')
 
   let setValue, currentValue
+  let saveBtn = null
+  let refreshBtn = null
+  const setButtonsDisabled = (disabled) => {
+    if (saveBtn) {
+      saveBtn.disabled = disabled
+    }
+    if (refreshBtn) {
+      refreshBtn.disabled = disabled
+    }
+  }
   const fetchField = () => {
+    setStatus('loading')
+    setButtonsDisabled(true)
     fetchParam(field.type.charAt(0), field.caps_name)
     .then(v => {
       currentValue = v
       setValue(v)
-      body.setAttribute('class', body.getAttribute('class').replace('loading', ''))
+      setStatus('')
       error.innerText = ''
     })
     .catch((e) => {
+      setStatus('')
       error.innerText = `Failed to load ${field.name}`;
     })
+    .finally(() => {
+      setButtonsDisabled(false)
+    })
   }
-  
+
+  const updateModifiedState = (rawValue) => {
+    const normalized = normalizeFieldValue(field, rawValue)
+    if (!normalized.valid) {
+      setStatus('modified')
+      error.innerText = normalized.error
+      return false
+    }
+    error.innerText = ''
+    if (`${currentValue}` != `${normalized.value}`) {
+      setStatus('modified')
+    } else {
+      setStatus('')
+    }
+    return true
+  }
+
+  const submitValue = (rawValue) => {
+    const normalized = normalizeFieldValue(field, rawValue)
+    if (!normalized.valid) {
+      setStatus('modified')
+      error.innerText = normalized.error
+      return
+    }
+    setStatus('loading')
+    setButtonsDisabled(true)
+    updateParam(field.type.charAt(0), field.caps_name, normalized.value)
+      .then(() => {
+        error.innerText = ''
+        fetchField()
+      })
+      .catch(() => {
+        setStatus('modified')
+        setButtonsDisabled(false)
+        error.innerText = `Failed to update ${field.name}`
+      })
+  }
+
   if (field.write && !field.indir) {
-    body.setAttribute('class', 'field')
     const input = document.createElement('input')
     input.setAttribute('class', 'value')
     input.addEventListener('keyup', (e) => {
-      let value = e.target.value
-      if (field.type == 'integer') {
-        value = parseInt(e.target.value)
-        if (isNaN(value)) {
-          return
-        }
-      }
-      if (e.keyCode == 13) {
-        body.setAttribute('class', 'field loading')
-        updateParam(field.type.charAt(0), field.caps_name, value)
-          .then(() => {
-            body.setAttribute('class', 'field')
-            fetchField()
-            error.innerText = ''
-          })
-          .catch(() => {
-            error.innerText = `Failed to update ${field.name}`
-          })
+      if (e.key == 'Enter') {
+        submitValue(e.target.value)
       } else {
-        error.innerText = ''
-        if (currentValue != value) {
-          body.setAttribute('class', 'field modified')
-        } else {
-          body.setAttribute('class', 'field')
-        }
+        updateModifiedState(e.target.value)
       }
     })
     body.appendChild(input)
+    const actions = document.createElement('div')
+    actions.setAttribute('class', 'field_actions')
+    saveBtn = document.createElement('button')
+    saveBtn.setAttribute('type', 'button')
+    saveBtn.innerText = 'Save'
+    saveBtn.addEventListener('click', () => submitValue(input.value))
+    refreshBtn = document.createElement('button')
+    refreshBtn.setAttribute('type', 'button')
+    refreshBtn.innerText = 'Refresh'
+    refreshBtn.addEventListener('click', fetchField)
+    actions.appendChild(saveBtn)
+    actions.appendChild(refreshBtn)
+    body.appendChild(actions)
     setValue = (v) => {input.value = v}
   } else if (field.write && field.indir) {
-    body.setAttribute('class', 'field')
     const input = document.createElement('select')
     input.setAttribute('class', 'value')
     input.addEventListener('change', (e) => {
-      body.setAttribute('class', 'field loading')
-        updateParam(field.type.charAt(0), field.caps_name, e.target.value)
-          .then(() => {
-            body.setAttribute('class', 'field')
-            fetchField()
-            error.innerText = ''
-          })
-          .catch(() => {
-            error.innerText = `Failed to update ${field.name}`
-          })
-        })
+      updateModifiedState(e.target.value)
+    })
     const opt = document.createElement('option')
     opt.value = 0
     opt.innerText = 'Disabled'
@@ -732,9 +1064,21 @@ function renderField(title, field) {
       input.appendChild(opt)
     })
     body.appendChild(input)
+    const actions = document.createElement('div')
+    actions.setAttribute('class', 'field_actions')
+    saveBtn = document.createElement('button')
+    saveBtn.setAttribute('type', 'button')
+    saveBtn.innerText = 'Save'
+    saveBtn.addEventListener('click', () => submitValue(input.value))
+    refreshBtn = document.createElement('button')
+    refreshBtn.setAttribute('type', 'button')
+    refreshBtn.innerText = 'Refresh'
+    refreshBtn.addEventListener('click', fetchField)
+    actions.appendChild(saveBtn)
+    actions.appendChild(refreshBtn)
+    body.appendChild(actions)
     setValue = (v) => {input.value = v}
   } else {
-    body.setAttribute('class', 'field ro')
     const value = document.createElement('div')
     value.setAttribute('class', 'value')
     value.setAttribute('id', field.name)
@@ -742,7 +1086,7 @@ function renderField(title, field) {
     setValue = (v) => {value.innerText = v}
   }
   body.appendChild(error)
-  body.setAttribute('class', body.getAttribute('class') + ' loading')
+  setStatus('loading')
   fetchField()
   return body
 }
@@ -885,7 +1229,7 @@ function renderTopMenu(onSelect) {
     body.setAttribute('class', 'menu system')
     onSelect('system')
   }))
-  document.body.appendChild(body)
+  return body
 }
 
 async function start() {
@@ -907,17 +1251,29 @@ async function start() {
     return acc
   }, {system: {}, modules: {}})
 
-  const params = document.createElement('div')
-  renderTopMenu((s) => {
+  initHeader()
+
+  const root = document.getElementById('body')
+  while (root.firstChild) root.removeChild(root.firstChild)
+
+  const menu = renderTopMenu((s) => {
     while (params.firstChild) params.removeChild(params.firstChild)
     params.appendChild(renderParams(modules[s]))
   })
+  root.appendChild(menu)
+
+  const params = document.createElement('div')
   params.appendChild(renderParams(modules.modules))
-  document.body.appendChild(params)
+  root.appendChild(params)
 }
 
 window.onload = () => {
-  start()
+  initGlobalStatus()
+  start().catch(() => {
+    setGlobalStatus('UI startup failed. Please retry.', 'error', () => {
+      start().catch(() => {})
+    })
+  })
 }
 
     </script>

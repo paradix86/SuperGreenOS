@@ -5,10 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>SuperGreenDriver</title>
     <style type="text/css">
+      <%- include('normalize.css') %>
       <%- include('style.css') %>
     </style>
   </head>
   <body>
+    <div id='app_header' class='app_header'>
+      <div class='header_item'>
+        <div class='header_label'>Firmware</div>
+        <div id='header_fw_name' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>Build</div>
+        <div id='header_fw_build' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>Wi-Fi</div>
+        <div id='header_wifi_status' class='header_value'>-</div>
+      </div>
+      <div class='header_item'>
+        <div class='header_label'>IP</div>
+        <div id='header_wifi_ip' class='header_value'>-</div>
+      </div>
+    </div>
+    <div id='global_status' class='global_status hidden'>
+      <span id='global_status_message'></span>
+      <button id='global_status_retry' type='button'>Retry</button>
+    </div>
     <div id='body'>
     </div>
     <script>

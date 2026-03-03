@@ -1,5 +1,16 @@
 let config = {}
 let arrays = {}
+let modules = {}
+let headerTimer = null
+
+const WIFI_STATUS_LABELS = {
+  1: 'Disconnected',
+  2: 'Connecting',
+  3: 'Connected',
+  4: 'Failed',
+  5: 'AP mode',
+}
+const HEADER_REFRESH_MS = 15000
 
 function moduleTitle(text) {
   const title = document.createElement('h3')
@@ -22,8 +33,88 @@ function arrayTitle(text, onShowHide) {
   return body
 }
 
+function parseIntegerValue(rawValue) {
+  const value = `${rawValue}`.trim()
+  if (!/^-?[0-9]+$/.test(value)) {
+    return { valid: false, error: 'Integer expected' }
+  }
+  return { valid: true, value: parseInt(value, 10) }
+}
+
+function normalizeFieldValue(field, rawValue) {
+  if (field.type == 'integer') {
+    return parseIntegerValue(rawValue)
+  }
+  return { valid: true, value: `${rawValue}` }
+}
+
+function findKeyByNameOrCaps(candidates) {
+  return config.keys.find((k) => candidates.indexOf(k.name) >= 0 || candidates.indexOf(k.caps_name) >= 0)
+}
+
+function setHeaderValue(id, value) {
+  const el = document.getElementById(id)
+  if (!el) {
+    return
+  }
+  el.innerText = value
+}
+
+async function refreshHeaderRuntime() {
+  const wifiStatusKey = findKeyByNameOrCaps(['wifi_status', 'WIFI_STATUS'])
+  const wifiIpKey = findKeyByNameOrCaps(['wifi_ip', 'WIFI_IP'])
+  const buildKey = findKeyByNameOrCaps(['ota_timestamp', 'OTA_TIMESTAMP'])
+
+  if (buildKey) {
+    try {
+      const build = await fetchParam(buildKey.type.charAt(0), buildKey.caps_name, { silent: true })
+      setHeaderValue('header_fw_build', `${build}`)
+    } catch (e) {
+      setHeaderValue('header_fw_build', '-')
+    }
+  } else {
+    setHeaderValue('header_fw_build', '-')
+  }
+
+  if (wifiStatusKey) {
+    try {
+      const status = await fetchParam(wifiStatusKey.type.charAt(0), wifiStatusKey.caps_name, { silent: true })
+      setHeaderValue('header_wifi_status', WIFI_STATUS_LABELS[status] || `Unknown (${status})`)
+    } catch (e) {
+      setHeaderValue('header_wifi_status', 'Offline')
+    }
+  } else {
+    setHeaderValue('header_wifi_status', '-')
+  }
+
+  if (wifiIpKey) {
+    try {
+      const ip = await fetchParam(wifiIpKey.type.charAt(0), wifiIpKey.caps_name, { silent: true })
+      setHeaderValue('header_wifi_ip', ip || '-')
+    } catch (e) {
+      setHeaderValue('header_wifi_ip', '-')
+    }
+  } else {
+    setHeaderValue('header_wifi_ip', '-')
+  }
+}
+
+function initHeader() {
+  setHeaderValue('header_fw_name', config.name || '-')
+  if (headerTimer) {
+    clearInterval(headerTimer)
+    headerTimer = null
+  }
+  refreshHeaderRuntime()
+  headerTimer = setInterval(refreshHeaderRuntime, HEADER_REFRESH_MS)
+}
+
 function renderField(title, field) {
   const body = document.createElement('div')
+  const baseClass = field.write ? 'field' : 'field ro'
+  const setStatus = (status) => {
+    body.setAttribute('class', status ? `${baseClass} ${status}` : baseClass)
+  }
 
   const label = document.createElement('label')
   label.innerText = title
@@ -33,69 +124,103 @@ function renderField(title, field) {
   error.setAttribute('class', 'error')
 
   let setValue, currentValue
+  let saveBtn = null
+  let refreshBtn = null
+  const setButtonsDisabled = (disabled) => {
+    if (saveBtn) {
+      saveBtn.disabled = disabled
+    }
+    if (refreshBtn) {
+      refreshBtn.disabled = disabled
+    }
+  }
   const fetchField = () => {
+    setStatus('loading')
+    setButtonsDisabled(true)
     fetchParam(field.type.charAt(0), field.caps_name)
     .then(v => {
       currentValue = v
       setValue(v)
-      body.setAttribute('class', body.getAttribute('class').replace('loading', ''))
+      setStatus('')
       error.innerText = ''
     })
     .catch((e) => {
+      setStatus('')
       error.innerText = `Failed to load ${field.name}`;
     })
+    .finally(() => {
+      setButtonsDisabled(false)
+    })
   }
-  
+
+  const updateModifiedState = (rawValue) => {
+    const normalized = normalizeFieldValue(field, rawValue)
+    if (!normalized.valid) {
+      setStatus('modified')
+      error.innerText = normalized.error
+      return false
+    }
+    error.innerText = ''
+    if (`${currentValue}` != `${normalized.value}`) {
+      setStatus('modified')
+    } else {
+      setStatus('')
+    }
+    return true
+  }
+
+  const submitValue = (rawValue) => {
+    const normalized = normalizeFieldValue(field, rawValue)
+    if (!normalized.valid) {
+      setStatus('modified')
+      error.innerText = normalized.error
+      return
+    }
+    setStatus('loading')
+    setButtonsDisabled(true)
+    updateParam(field.type.charAt(0), field.caps_name, normalized.value)
+      .then(() => {
+        error.innerText = ''
+        fetchField()
+      })
+      .catch(() => {
+        setStatus('modified')
+        setButtonsDisabled(false)
+        error.innerText = `Failed to update ${field.name}`
+      })
+  }
+
   if (field.write && !field.indir) {
-    body.setAttribute('class', 'field')
     const input = document.createElement('input')
     input.setAttribute('class', 'value')
     input.addEventListener('keyup', (e) => {
-      let value = e.target.value
-      if (field.type == 'integer') {
-        value = parseInt(e.target.value)
-        if (isNaN(value)) {
-          return
-        }
-      }
-      if (e.keyCode == 13) {
-        body.setAttribute('class', 'field loading')
-        updateParam(field.type.charAt(0), field.caps_name, value)
-          .then(() => {
-            body.setAttribute('class', 'field')
-            fetchField()
-            error.innerText = ''
-          })
-          .catch(() => {
-            error.innerText = `Failed to update ${field.name}`
-          })
+      if (e.key == 'Enter') {
+        submitValue(e.target.value)
       } else {
-        error.innerText = ''
-        if (currentValue != value) {
-          body.setAttribute('class', 'field modified')
-        } else {
-          body.setAttribute('class', 'field')
-        }
+        updateModifiedState(e.target.value)
       }
     })
     body.appendChild(input)
+    const actions = document.createElement('div')
+    actions.setAttribute('class', 'field_actions')
+    saveBtn = document.createElement('button')
+    saveBtn.setAttribute('type', 'button')
+    saveBtn.innerText = 'Save'
+    saveBtn.addEventListener('click', () => submitValue(input.value))
+    refreshBtn = document.createElement('button')
+    refreshBtn.setAttribute('type', 'button')
+    refreshBtn.innerText = 'Refresh'
+    refreshBtn.addEventListener('click', fetchField)
+    actions.appendChild(saveBtn)
+    actions.appendChild(refreshBtn)
+    body.appendChild(actions)
     setValue = (v) => {input.value = v}
   } else if (field.write && field.indir) {
-    body.setAttribute('class', 'field')
     const input = document.createElement('select')
     input.setAttribute('class', 'value')
     input.addEventListener('change', (e) => {
-      body.setAttribute('class', 'field loading')
-        updateParam(field.type.charAt(0), field.caps_name, e.target.value)
-          .then(() => {
-            body.setAttribute('class', 'field')
-            fetchField()
-            error.innerText = ''
-          })
-          .catch(() => {
-            error.innerText = `Failed to update ${field.name}`
-          })
-        })
+      updateModifiedState(e.target.value)
+    })
     const opt = document.createElement('option')
     opt.value = 0
     opt.innerText = 'Disabled'
@@ -107,9 +232,21 @@ function renderField(title, field) {
       input.appendChild(opt)
     })
     body.appendChild(input)
+    const actions = document.createElement('div')
+    actions.setAttribute('class', 'field_actions')
+    saveBtn = document.createElement('button')
+    saveBtn.setAttribute('type', 'button')
+    saveBtn.innerText = 'Save'
+    saveBtn.addEventListener('click', () => submitValue(input.value))
+    refreshBtn = document.createElement('button')
+    refreshBtn.setAttribute('type', 'button')
+    refreshBtn.innerText = 'Refresh'
+    refreshBtn.addEventListener('click', fetchField)
+    actions.appendChild(saveBtn)
+    actions.appendChild(refreshBtn)
+    body.appendChild(actions)
     setValue = (v) => {input.value = v}
   } else {
-    body.setAttribute('class', 'field ro')
     const value = document.createElement('div')
     value.setAttribute('class', 'value')
     value.setAttribute('id', field.name)
@@ -117,7 +254,7 @@ function renderField(title, field) {
     setValue = (v) => {value.innerText = v}
   }
   body.appendChild(error)
-  body.setAttribute('class', body.getAttribute('class') + ' loading')
+  setStatus('loading')
   fetchField()
   return body
 }
@@ -260,7 +397,7 @@ function renderTopMenu(onSelect) {
     body.setAttribute('class', 'menu system')
     onSelect('system')
   }))
-  document.body.appendChild(body)
+  return body
 }
 
 async function start() {
@@ -282,15 +419,27 @@ async function start() {
     return acc
   }, {system: {}, modules: {}})
 
-  const params = document.createElement('div')
-  renderTopMenu((s) => {
+  initHeader()
+
+  const root = document.getElementById('body')
+  while (root.firstChild) root.removeChild(root.firstChild)
+
+  const menu = renderTopMenu((s) => {
     while (params.firstChild) params.removeChild(params.firstChild)
     params.appendChild(renderParams(modules[s]))
   })
+  root.appendChild(menu)
+
+  const params = document.createElement('div')
   params.appendChild(renderParams(modules.modules))
-  document.body.appendChild(params)
+  root.appendChild(params)
 }
 
 window.onload = () => {
-  start()
+  initGlobalStatus()
+  start().catch(() => {
+    setGlobalStatus('UI startup failed. Please retry.', 'error', () => {
+      start().catch(() => {})
+    })
+  })
 }

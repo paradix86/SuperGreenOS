@@ -1,5 +1,69 @@
 const URL = 'http://192.168.1.11'
 const DEBUG = false
+const REQUEST_RETRIES = 3
+
+const globalStatus = {
+  root: null,
+  message: null,
+  retry: null,
+  retryAction: null,
+}
+
+function initGlobalStatus() {
+  globalStatus.root = document.getElementById('global_status')
+  globalStatus.message = document.getElementById('global_status_message')
+  globalStatus.retry = document.getElementById('global_status_retry')
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  globalStatus.retry.addEventListener('click', () => {
+    if (!globalStatus.retryAction) {
+      return
+    }
+    const action = globalStatus.retryAction
+    action()
+  })
+  clearGlobalStatus()
+}
+
+function clearGlobalStatus() {
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  globalStatus.root.setAttribute('class', 'global_status hidden')
+  globalStatus.message.innerText = ''
+  globalStatus.retryAction = null
+  globalStatus.retry.style.display = 'none'
+}
+
+function setGlobalStatus(message, level, retryAction) {
+  if (!globalStatus.root || !globalStatus.message || !globalStatus.retry) {
+    return
+  }
+  const statusLevel = level || 'error'
+  globalStatus.root.setAttribute('class', `global_status ${statusLevel}`)
+  globalStatus.message.innerText = message
+  globalStatus.retryAction = retryAction || null
+  globalStatus.retry.style.display = globalStatus.retryAction ? 'inline-block' : 'none'
+}
+
+function toHttpError(status, responseText, operation) {
+  return {
+    status: status,
+    responseText: responseText,
+    operation: operation,
+  }
+}
+
+function formatHttpError(error) {
+  if (!error) {
+    return 'unknown error'
+  }
+  if (error.status) {
+    return `HTTP ${error.status}`
+  }
+  return 'network error'
+}
 
 const schedule_promise = (n, retries) => {
   let loading_param_promise = Promise.resolve(),
@@ -34,56 +98,93 @@ const schedule_promise = (n, retries) => {
     return p
   }
 }
-const fetchQueue = schedule_promise(3, 3)
+const fetchQueue = schedule_promise(3, REQUEST_RETRIES)
+
+function queueRequest(label, req_func, options) {
+  const opts = options || {}
+  const silent = opts.silent === true
+  return fetchQueue(
+    req_func,
+    (error, attempt) => {
+      if (silent) {
+        return
+      }
+      if (attempt < REQUEST_RETRIES && (!error || error.status !== 404)) {
+        setGlobalStatus(`${label}: retry ${attempt}/${REQUEST_RETRIES}...`, 'warning')
+      }
+    })
+    .then((value) => {
+      if (!silent) {
+        clearGlobalStatus()
+      }
+      return value
+    })
+    .catch((error) => {
+      if (!silent) {
+        const message = `${label} failed (${formatHttpError(error)}).`
+        setGlobalStatus(message, 'error', () => {
+          queueRequest(label, req_func, options).catch(() => {})
+        })
+      }
+      throw error
+    })
+}
 
 const fetchConfig = async function() {
-  return new Promise(function(resolve, reject) {
+  return queueRequest('Loading config', () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('GET', DEBUG ? '/config.json' : '/fs/config.json', true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'fetchConfig'))
         return
       }
-      resolve(JSON.parse(r.responseText))
+      try {
+        resolve(JSON.parse(r.responseText))
+      } catch (e) {
+        reject(toHttpError(r.status, 'invalid json', 'fetchConfig'))
+      }
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'fetchConfig'))
     r.send()
-  })
+  }))
 }
 
-const fetchParam = async function(type, paramName) {
-  return fetchQueue(() => new Promise(function(resolve, reject) {
+const fetchParam = async function(type, paramName, options) {
+  return queueRequest(`Loading ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('GET', `${DEBUG ? URL : ''}/${type}?k=${paramName}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'fetchParam'))
         return
       }
       if (type == 'i') {
-        resolve(parseInt(r.responseText))
+        resolve(parseInt(r.responseText, 10))
       } else {
-        resolve(r.responseText);
+        resolve(r.responseText)
       }
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'fetchParam'))
     r.send()
-  }))
+  }), options)
 }
 
-const updateParam = async function(type, paramName, value) {
-  return fetchQueue(() => new Promise(function(resolve, reject) {
+const updateParam = async function(type, paramName, value, options) {
+  return queueRequest(`Updating ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('POST', `${DEBUG ? URL : ''}/${type}?k=${paramName}&v=${encodeURIComponent(value)}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
-        reject(r.status, r.responseText)
+        reject(toHttpError(r.status, r.responseText, 'updateParam'))
         return
       }
-      resolve(r.responseText);
+      resolve(r.responseText)
     }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'updateParam'))
     r.send()
-  }))
+  }), options)
 }
