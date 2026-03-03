@@ -67,6 +67,73 @@ body, html {
   cursor: pointer;
 }
 
+.app_tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10pt;
+  padding: 8pt 10pt;
+  border-bottom: 1pt solid #ececec;
+  background-color: #fafafa;
+}
+
+.connection_badge {
+  display: flex;
+  align-items: center;
+  gap: 10pt;
+}
+
+.connection_status {
+  display: inline-block;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2pt 8pt;
+  border: 1pt solid transparent;
+}
+
+.connection_status.online {
+  color: #0f6b2b;
+  background-color: #e7f7ec;
+  border-color: #b9e5c5;
+}
+
+.connection_status.offline {
+  color: #9a1c1c;
+  background-color: #ffecec;
+  border-color: #f0c0c0;
+}
+
+.connection_last_sync {
+  color: #777;
+}
+
+.tools_actions {
+  display: flex;
+  gap: 8pt;
+}
+
+.tools_actions > button {
+  border: 1pt solid #cfcfcf;
+  background-color: #ffffff;
+  color: #5a5a5a;
+  border-radius: 4pt;
+  padding: 4pt 8pt;
+  cursor: pointer;
+}
+
+@media only screen and (max-width: 800px) {
+  .app_tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .connection_badge {
+    justify-content: space-between;
+  }
+  .tools_actions {
+    justify-content: flex-start;
+  }
+}
+
 @media only screen and (max-width: 800px) {
   .app_header {
     grid-template-columns: repeat(2, minmax(120px, 1fr));

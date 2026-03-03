@@ -65,6 +65,18 @@ function formatHttpError(error) {
   return 'network error'
 }
 
+function notifyConnectionStatus(online) {
+  if (typeof window.onConnectionStatusChanged == 'function') {
+    window.onConnectionStatusChanged(online)
+  }
+}
+
+function notifyLastSync(syncDate) {
+  if (typeof window.onConnectionSync == 'function') {
+    window.onConnectionSync(syncDate)
+  }
+}
+
 const schedule_promise = (n, retries) => {
   let loading_param_promise = Promise.resolve(),
       promises = []
@@ -116,12 +128,17 @@ function queueRequest(label, req_func, options) {
       }
     })
     .then((value) => {
+      notifyConnectionStatus(true)
+      notifyLastSync(new Date())
       if (!silent) {
         clearGlobalStatus()
       }
       return value
     })
     .catch((error) => {
+      if (!error || error.status === 0) {
+        notifyConnectionStatus(false)
+      }
       if (!silent) {
         const message = `${label} failed (${formatHttpError(error)}).`
         if (allowGlobalRetry) {

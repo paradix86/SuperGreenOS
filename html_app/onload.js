@@ -2,6 +2,7 @@ let config = {}
 let arrays = {}
 let modules = {}
 let headerTimer = null
+let importInProgress = false
 
 const WIFI_STATUS_LABELS = {
   1: 'Disconnected',
@@ -11,6 +12,218 @@ const WIFI_STATUS_LABELS = {
   5: 'AP mode',
 }
 const HEADER_REFRESH_MS = 15000
+
+function formatClock(syncDate) {
+  if (!syncDate || Number.isNaN(syncDate.getTime())) {
+    return '-'
+  }
+  return syncDate.toLocaleTimeString()
+}
+
+function setConnectionBadge(online) {
+  const status = document.getElementById('connection_status')
+  if (!status) {
+    return
+  }
+  status.innerText = online ? 'Online' : 'Offline'
+  status.setAttribute('class', `connection_status ${online ? 'online' : 'offline'}`)
+}
+
+function setConnectionLastSync(syncDate) {
+  const label = document.getElementById('connection_last_sync')
+  if (!label) {
+    return
+  }
+  label.innerText = `Last sync: ${formatClock(syncDate)}`
+}
+
+function isSensitiveField(field) {
+  const key = `${field.name} ${field.caps_name}`.toLowerCase()
+  return key.indexOf('reboot') >= 0 ||
+    key.indexOf('ota_start') >= 0 ||
+    key.indexOf('auth') >= 0 ||
+    key.indexOf('signing') >= 0
+}
+
+function confirmSensitiveChange(field) {
+  const label = field.name || field.caps_name
+  return window.confirm(`Sensitive key "${label}" will be updated. Continue?`)
+}
+
+function downloadJson(filename, payload) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+async function exportCurrentConfig() {
+  const btn = document.getElementById('export_config_btn')
+  if (!btn || !config.keys || config.keys.length == 0) {
+    return
+  }
+  btn.disabled = true
+  setGlobalStatus('Exporting config...', 'warning')
+  try {
+    const values = {}
+    const failed = []
+    for (const key of config.keys) {
+      try {
+        values[key.caps_name] = await fetchParam(key.type.charAt(0), key.caps_name, { silent: true })
+      } catch (e) {
+        failed.push(key.caps_name)
+      }
+    }
+    const payload = {
+      schema: 'supergreenos.config.v1',
+      device: config.name || '',
+      exported_at: new Date().toISOString(),
+      values: values,
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    downloadJson(`supergreenos-config-${timestamp}.json`, payload)
+    if (failed.length > 0) {
+      setGlobalStatus(`Export completed with ${failed.length} read failures.`, 'warning')
+    } else {
+      setGlobalStatus('Export completed.', 'warning')
+      setTimeout(() => clearGlobalStatus(), 2500)
+    }
+  } finally {
+    btn.disabled = false
+  }
+}
+
+function parseImportValues(payload) {
+  if (!payload || typeof payload != 'object') {
+    return null
+  }
+  if (payload.values && typeof payload.values == 'object') {
+    return payload.values
+  }
+  return payload
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(new Error('Unable to read selected file'))
+    reader.readAsText(file)
+  })
+}
+
+async function applyImportedConfig(importValues) {
+  const keyByCaps = new Map()
+  const keyByName = new Map()
+  config.keys.filter((k) => k.write).forEach((k) => {
+    keyByCaps.set(k.caps_name, k)
+    keyByName.set(k.name, k)
+  })
+
+  const pendingByCaps = new Map()
+  const invalid = []
+  Object.keys(importValues).forEach((rawKey) => {
+    const key = keyByCaps.get(rawKey) || keyByName.get(rawKey)
+    if (!key) {
+      return
+    }
+    const normalized = normalizeFieldValue(key, importValues[rawKey])
+    if (!normalized.valid) {
+      invalid.push(key.name)
+      return
+    }
+    pendingByCaps.set(key.caps_name, { field: key, value: normalized.value })
+  })
+
+  const changes = Array.from(pendingByCaps.values())
+  if (changes.length == 0) {
+    setGlobalStatus('Import file has no writable keys for this controller.', 'warning')
+    return
+  }
+
+  const sensitive = changes.filter((c) => isSensitiveField(c.field))
+  if (sensitive.length > 0) {
+    const names = sensitive.slice(0, 6).map((c) => c.field.name).join(', ')
+    const suffix = sensitive.length > 6 ? ', ...' : ''
+    if (!window.confirm(`Import includes ${sensitive.length} sensitive key(s): ${names}${suffix}. Continue?`)) {
+      setGlobalStatus('Import cancelled.', 'warning')
+      return
+    }
+  }
+
+  setGlobalStatus(`Importing ${changes.length} key(s)...`, 'warning')
+  const failed = []
+  for (const change of changes) {
+    try {
+      await updateParam(change.field.type.charAt(0), change.field.caps_name, change.value, { silent: true, allowGlobalRetry: false })
+    } catch (e) {
+      failed.push(change.field.name)
+    }
+  }
+
+  await start()
+  if (failed.length > 0 || invalid.length > 0) {
+    setGlobalStatus(`Import done with errors (failed: ${failed.length}, invalid: ${invalid.length}).`, 'warning')
+  } else {
+    setGlobalStatus(`Import completed (${changes.length} key(s)).`, 'warning')
+    setTimeout(() => clearGlobalStatus(), 2500)
+  }
+}
+
+async function importConfigFromFile(file) {
+  if (!file || importInProgress) {
+    return
+  }
+  importInProgress = true
+  try {
+    const text = await readFileAsText(file)
+    const payload = JSON.parse(text)
+    const values = parseImportValues(payload)
+    if (!values) {
+      setGlobalStatus('Invalid import file format.', 'error')
+      return
+    }
+    await applyImportedConfig(values)
+  } catch (e) {
+    setGlobalStatus(`Import failed (${e && e.message ? e.message : 'invalid file'}).`, 'error')
+  } finally {
+    importInProgress = false
+  }
+}
+
+function initAppTools() {
+  const exportBtn = document.getElementById('export_config_btn')
+  if (exportBtn && exportBtn.dataset.bound != '1') {
+    exportBtn.addEventListener('click', () => {
+      exportCurrentConfig().catch(() => {
+        setGlobalStatus('Export failed.', 'error')
+      })
+    })
+    exportBtn.dataset.bound = '1'
+  }
+
+  const importBtn = document.getElementById('import_config_btn')
+  const importInput = document.getElementById('import_config_input')
+  if (importBtn && importInput && importBtn.dataset.bound != '1') {
+    importBtn.addEventListener('click', () => importInput.click())
+    importInput.addEventListener('change', (event) => {
+      const file = event.target.files && event.target.files[0]
+      importConfigFromFile(file).catch(() => {
+        setGlobalStatus('Import failed.', 'error')
+      })
+      event.target.value = ''
+    })
+    importBtn.dataset.bound = '1'
+  }
+
+  setConnectionBadge(false)
+  setConnectionLastSync(null)
+}
 
 function moduleTitle(text) {
   const title = document.createElement('h3')
@@ -109,6 +322,15 @@ function initHeader() {
   headerTimer = setInterval(refreshHeaderRuntime, HEADER_REFRESH_MS)
 }
 
+window.onConnectionStatusChanged = (online) => {
+  setConnectionBadge(online)
+}
+
+window.onConnectionSync = (syncDate) => {
+  setConnectionBadge(true)
+  setConnectionLastSync(syncDate)
+}
+
 function renderField(title, field) {
   const body = document.createElement('div')
   const baseClass = field.write ? 'field' : 'field ro'
@@ -174,6 +396,14 @@ function renderField(title, field) {
     if (!normalized.valid) {
       setStatus('modified')
       error.innerText = normalized.error
+      return
+    }
+    if (`${currentValue}` == `${normalized.value}`) {
+      setStatus('')
+      error.innerText = ''
+      return
+    }
+    if (isSensitiveField(field) && !confirmSensitiveChange(field)) {
       return
     }
     setStatus('loading')
@@ -437,6 +667,7 @@ async function start() {
 
 window.onload = () => {
   initGlobalStatus()
+  initAppTools()
   start().catch(() => {
     setGlobalStatus('UI startup failed. Please retry.', 'error', () => {
       start().catch(() => {})
