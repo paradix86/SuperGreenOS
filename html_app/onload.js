@@ -137,7 +137,7 @@ function renderField(title, field) {
   const fetchField = () => {
     setStatus('loading')
     setButtonsDisabled(true)
-    fetchParam(field.type.charAt(0), field.caps_name)
+    fetchParam(field.type.charAt(0), field.caps_name, { retryAction: fetchField })
     .then(v => {
       currentValue = v
       setValue(v)

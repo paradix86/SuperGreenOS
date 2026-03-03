@@ -744,6 +744,8 @@ const fetchQueue = schedule_promise(3, REQUEST_RETRIES)
 function queueRequest(label, req_func, options) {
   const opts = options || {}
   const silent = opts.silent === true
+  const allowGlobalRetry = opts.allowGlobalRetry !== false
+  const customRetryAction = typeof opts.retryAction == 'function' ? opts.retryAction : null
   return fetchQueue(
     req_func,
     (error, attempt) => {
@@ -763,9 +765,14 @@ function queueRequest(label, req_func, options) {
     .catch((error) => {
       if (!silent) {
         const message = `${label} failed (${formatHttpError(error)}).`
-        setGlobalStatus(message, 'error', () => {
-          queueRequest(label, req_func, options).catch(() => {})
-        })
+        if (allowGlobalRetry) {
+          const retryAction = customRetryAction || (() => {
+            queueRequest(label, req_func, opts).catch(() => {})
+          })
+          setGlobalStatus(message, 'error', retryAction)
+        } else {
+          setGlobalStatus(message, 'error')
+        }
       }
       throw error
     })
@@ -814,6 +821,7 @@ const fetchParam = async function(type, paramName, options) {
 }
 
 const updateParam = async function(type, paramName, value, options) {
+  const opts = Object.assign({ allowGlobalRetry: false }, options || {})
   return queueRequest(`Updating ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
     r.open('POST', `${DEBUG ? URL : ''}/${type}?k=${paramName}&v=${encodeURIComponent(value)}`, true)
@@ -827,7 +835,7 @@ const updateParam = async function(type, paramName, value, options) {
     }
     r.onerror = () => reject(toHttpError(0, 'xhr error', 'updateParam'))
     r.send()
-  }), options)
+  }), opts)
 }
 
       let config = {}
@@ -969,7 +977,7 @@ function renderField(title, field) {
   const fetchField = () => {
     setStatus('loading')
     setButtonsDisabled(true)
-    fetchParam(field.type.charAt(0), field.caps_name)
+    fetchParam(field.type.charAt(0), field.caps_name, { retryAction: fetchField })
     .then(v => {
       currentValue = v
       setValue(v)
