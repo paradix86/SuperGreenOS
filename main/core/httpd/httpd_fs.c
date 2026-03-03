@@ -28,6 +28,7 @@
 #include "esp_err.h"
 
 #include "../log/log.h"
+#include "../kv/kv.h"
 #include "esp_vfs.h"
 #include "esp_spiffs.h"
 #include "esp_http_server.h"
@@ -43,6 +44,12 @@ char file_buffer[FILE_BUFSIZE] = {0};
 
 #define MAX_FILE_SIZE (15*1024)
 #define MAX_FILE_SIZE_STR "15KB"
+
+#ifndef SGL_FORCE_SPIFFS_FORMAT_ONCE
+#define SGL_FORCE_SPIFFS_FORMAT_ONCE 0
+#endif
+
+#define SGL_SPIFFS_FORMAT_DONE_KEY "SFSFMT1"
 
 /* Send HTTP response with a run-time generated html consisting of
  * a list of all files and folders under the requested path */
@@ -351,6 +358,21 @@ void init_spiffs(void) {
     }
     return;
   }
+
+#if SGL_FORCE_SPIFFS_FORMAT_ONCE
+  if (!hasi8(SGL_SPIFFS_FORMAT_DONE_KEY)) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@FS Maintenance mode: formatting SPIFFS once");
+    ret = esp_spiffs_format(conf.partition_label);
+    if (ret != ESP_OK) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@FS Failed to format SPIFFS (%s)", esp_err_to_name(ret));
+      return;
+    }
+    seti8(SGL_SPIFFS_FORMAT_DONE_KEY, 1);
+    ESP_LOGI(SGO_LOG_NOSEND, "@FS SPIFFS format done");
+  } else {
+    ESP_LOGI(SGO_LOG_NOSEND, "@FS Maintenance mode: format already done, skipping");
+  }
+#endif
 
   size_t total = 0, used = 0;
   ret = esp_spiffs_info(NULL, &total, &used);

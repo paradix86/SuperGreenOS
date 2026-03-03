@@ -1,0 +1,25 @@
+name: Build Maintenance OTA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:release-v3.3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Maintenance Firmware
+        run: |
+          chmod +x scripts/build_maintenance_ota.sh
+          ./scripts/build_maintenance_ota.sh
+          test -f releases/SuperGreenMaintenance/last_timestamp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supergreen-maintenance-ota
+          path: releases/SuperGreenMaintenance
+          if-no-files-found: error
