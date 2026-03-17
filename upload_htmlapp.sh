@@ -23,10 +23,37 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# Use the tightest deterministic gzip stream we can to stay within the
-# controller's legacy upload and SPIFFS limits.
-gzip -9 -n -c "$CONFIG_FILE" > "$TMP_DIR/config.json"
-gzip -9 -n -c "$APP_FILE" > "$TMP_DIR/app.html"
+compress_file() {
+  local input=$1
+  local output=$2
+  local zopfli_python="${SGL_GZIP_PYTHON:-}"
+
+  if [ -z "$zopfli_python" ] && [ -x /tmp/zopfli-venv/bin/python ]; then
+    zopfli_python=/tmp/zopfli-venv/bin/python
+  fi
+
+  if [ -n "$zopfli_python" ] && "$zopfli_python" - <<'PY' >/dev/null 2>&1
+import zopfli.gzip
+PY
+  then
+    "$zopfli_python" - "$input" "$output" <<'PY'
+import pathlib
+import sys
+import zopfli.gzip
+
+src = pathlib.Path(sys.argv[1])
+dst = pathlib.Path(sys.argv[2])
+dst.write_bytes(zopfli.gzip.compress(src.read_bytes()))
+PY
+  else
+    # Use the tightest deterministic gzip stream we can to stay within the
+    # controller's legacy upload and SPIFFS limits.
+    gzip -9 -n -c "$input" > "$output"
+  fi
+}
+
+compress_file "$CONFIG_FILE" "$TMP_DIR/config.json"
+compress_file "$APP_FILE" "$TMP_DIR/app.html"
 
 curl --fail -XPOST --upload-file "$TMP_DIR/config.json" -vvv "http://$NAME/fs/config.json"
 curl --fail -XPOST --upload-file "$TMP_DIR/app.html" -vvv "http://$NAME/fs/app.html"
