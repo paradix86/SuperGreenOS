@@ -22,6 +22,7 @@ Current notable validated topics:
 - maintenance OTA plus mandatory UI restore
 - SPIFFS size limits on the legacy controller
 - first deployed backend module: `sensor_health`
+- relationship between this repo and `SuperGreenOSBoilerplate`
 
 ## Suggested rule
 

@@ -113,3 +113,15 @@ Practical consequences:
 - `upload_htmlapp.sh` now prefers `zopfli` when available
 - fallback stays `gzip -9 -n`
 - UI deduplication work can be the difference between success and failure
+
+## Browser cache after UI upload
+
+Another practical trap was browser caching.
+
+Even after a successful UI upload, `/fs/app.html` could still appear unchanged until a hard refresh or cache-busting query string was used.
+
+Mitigation now present in firmware:
+
+- `main/core/httpd/httpd_fs.c` sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
+- plus `Pragma: no-cache`
+- plus `Expires: 0`

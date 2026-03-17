@@ -90,6 +90,16 @@ It updates `sensor_health_summary` by polling:
 
 It is intentionally tiny so it stays deployable on the legacy SPIFFS layout.
 
+## Browser cache gotcha
+
+When testing UI changes on the live controller, stale browser cache can masquerade as a failed upload.
+
+This repo now mitigates that in firmware by serving SPIFFS files with no-cache headers, but if behavior still looks old:
+
+- use a hard refresh
+- add a cache-busting query string to `/fs/app.html`
+- or use a private/incognito window
+
 ## Rule for future changes
 
 If a UI change matters, keep it in repo source under `html_app/` so it survives:

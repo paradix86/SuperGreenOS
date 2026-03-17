@@ -90,3 +90,14 @@ That extends the first backend win without spreading logic everywhere.
 - `main/blower/`
 - `main/watering/`
 - `config_gen/config/`
+
+## Boilerplate comparison shortlist
+
+When looking for reusable upstream ideas, compare these areas against `SuperGreenOSBoilerplate` first:
+
+- `config_gen/config/`
+- `templates/`
+- `main/core/`
+- root generation scripts
+
+Do not treat the boilerplate as an embedded dependency; use it as a selective upstream reference.

@@ -32,6 +32,22 @@ git submodule update --init --recursive --force
 
 ## Important notes for modern Linux
 
+## Upstream reference repo
+
+This project already contains the generator architecture from `SuperGreenOSBoilerplate`.
+
+Practical rule:
+
+- use `SuperGreenOSBoilerplate` as a comparison/reference repo
+- do not vendor the whole boilerplate into this project
+
+Useful comparison targets:
+
+- `config_gen/config/`
+- `templates/`
+- `main/core/`
+- root helper scripts
+
 ### Python setting in this repo
 
 This project must not force Python 2 on a modern host.

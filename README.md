@@ -279,6 +279,7 @@ Important practical discoveries:
 - duplicated CSS can make `app.html` too large to upload
 - `upload_htmlapp.sh` now prefers `zopfli` when available and falls back to `gzip -9 -n`
 - the current web UI includes a very small `sensor_health` debug bridge because richer JS quickly burns the SPIFFS budget
+- browsers may cache `/fs/app.html`; the firmware now serves SPIFFS files with `no-cache` headers to reduce stale UI after upload
 
 ## Sensor health backend
 
