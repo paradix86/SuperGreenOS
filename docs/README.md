@@ -15,6 +15,14 @@ It is intentionally plain Markdown so it works well:
 - [UI Customization](./ui-customization.md)
 - [Backend Roadmap](./backend-roadmap.md)
 
+Current notable validated topics:
+
+- modern Ubuntu build flow for ESP-IDF `3.3.1`
+- canonical `update_config.sh -> update_templates.sh -> update_htmlapp.sh` generation order
+- maintenance OTA plus mandatory UI restore
+- SPIFFS size limits on the legacy controller
+- first deployed backend module: `sensor_health`
+
 ## Suggested rule
 
 Keep:

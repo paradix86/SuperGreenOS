@@ -6,6 +6,7 @@ This document captures the workflow that was validated end-to-end in March 2026.
 
 ```bash
 cd /home/alan/sources/SuperGreenOS
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
 bash ./update_templates.sh config.controller.json
 bash ./update_htmlapp.sh config.controller.json
 
@@ -19,6 +20,11 @@ Expected output:
 
 - `releases/SuperGreenMaintenance/last_timestamp`
 - `releases/SuperGreenMaintenance/<timestamp>/firmware.bin`
+
+Verified timestamps:
+
+- `1773751114`
+- `1773757485`
 
 ## Serve OTA files
 
@@ -58,6 +64,8 @@ After boot, the controller should:
 - show the new `ota.timestamp`
 - reset `start` to `0`
 
+The `1773757485` deployment was also used to verify the first live `sensor_health` backend.
+
 ## Important maintenance behavior
 
 The maintenance OTA build forces a one-time SPIFFS format.
@@ -80,3 +88,28 @@ bash ./upload_htmlapp.sh 192.168.1.104 ./spiffs_fs
 Expected response:
 
 - `@FS File uploaded successfully`
+
+## Wi-Fi file replacement after OTA
+
+The legacy upload handler originally failed replacing existing SPIFFS files after OTA with:
+
+- `500 Failed to create file`
+
+The fix was applied in:
+
+- `main/core/httpd/httpd_fs.c`
+
+Behavioral fix:
+
+- remove the old file with `unlink(filepath);` before opening the replacement file for write
+
+## SPIFFS size budget
+
+The `storage` partition is only `0x8000` (`32 KB`), so compressed UI size matters.
+
+Practical consequences:
+
+- a slightly larger `app.html.gz` can fail to upload or fit
+- `upload_htmlapp.sh` now prefers `zopfli` when available
+- fallback stays `gzip -9 -n`
+- UI deduplication work can be the difference between success and failure

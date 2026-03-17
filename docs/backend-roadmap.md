@@ -13,7 +13,27 @@ The recovered UI contains several automation-oriented panels that currently dese
 
 ### 1. Sensor Health
 
-Best first backend feature because it:
+Phase 1 is now implemented and deployed in a first working form.
+
+What already exists:
+
+- generated config in `config_gen/config/SuperGreenOS/Controllers/sensor_health.cue`
+- backend module in `main/sensor_health/`
+- live generated keys such as:
+  - `sensor_health_enabled`
+  - `sensor_health_period_s`
+  - `sensor_health_warmup_samples`
+  - `sensor_health_stuck_samples`
+  - `sensor_health_status`
+  - `sensor_health_last_alert`
+- compact read-only UI bridge in `html_app/sensor-health.custom.js`
+
+Verified live device state included:
+
+- `SENSOR_HEALTH_STATUS = 3`
+- `SENSOR_HEALTH_LAST_ALERT = box_0_co2_stuck`
+
+Why it was the best first backend feature:
 
 - is mostly diagnostic
 - has low actuator risk
@@ -52,14 +72,13 @@ Start small.
 
 Use aggregated counters and rolling summaries first instead of a heavy full-history design.
 
-## Recommended phase 1
+## Recommended next phase
 
-Build only:
+Keep building:
 
-- `sensor_health`
 - `climate_policy`
 
-That gives a strong first backend PR without spreading logic everywhere.
+That extends the first backend win without spreading logic everywhere.
 
 ## Integration points already present in the repo
 

@@ -16,6 +16,7 @@ This project uses legacy ESP-IDF `3.3.1` with the old `make`-based build.
 - `npm`
 - `ejs-cli`
 - `mkspiffs`
+- `cue 0.0.8`
 
 ## ESP-IDF checkout
 
@@ -46,6 +47,23 @@ in:
 - `sdkconfig`
 - `sdkconfig.defaults`
 
+### Config generation is part of the build
+
+This project now expects `config.controller.json` to be regenerated from CUE before template generation.
+
+Canonical order:
+
+```bash
+cd /home/alan/sources/SuperGreenOS
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
+bash ./update_templates.sh config.controller.json
+bash ./update_htmlapp.sh config.controller.json
+```
+
+Important local fix:
+
+- `update_config.sh` must not delete `CONFIG_VERSION` from `sdkconfig`
+
 ### Legacy ESP-IDF compatibility issues
 
 These are local environment fixes that may be needed in the ESP-IDF checkout:
@@ -64,17 +82,10 @@ pip install "setuptools<81"
 
 ## Required project generation step
 
-Before building firmware, always regenerate template-derived files:
-
-```bash
-cd /home/alan/sources/SuperGreenOS
-bash ./update_templates.sh config.controller.json
-bash ./update_htmlapp.sh config.controller.json
-```
-
-If you skip this, generated files such as these may be missing:
+If you skip generation, files such as these may be missing or stale:
 
 - `main/component.mk`
 - `main/init.c`
 - `main/core/modules.h`
 - `main/core/include_modules.h`
+- generated KV / keys metadata derived from `config.controller.json`

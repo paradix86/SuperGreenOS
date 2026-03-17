@@ -47,6 +47,17 @@ Recovered and preserved in the repo:
 - `Dynamic Climate Setpoint`
 - `History & KPI`
 
+## Legacy SPIFFS size budget matters
+
+The controller SPIFFS partition is only `32 KB`, so UI size is part of the design.
+
+Important discovery:
+
+- `html_app/style.custom.css` accidentally contained a full second copy of `normalize.css`
+- `html_app/index.html` already included `normalize.min.css`
+
+Removing that duplication was required to make the compressed app fit again.
+
 ## Uploading the UI
 
 Use:
@@ -56,6 +67,28 @@ bash ./upload_htmlapp.sh <controller-ip> ./spiffs_fs
 ```
 
 The upload script uses gzip flags compatible with the legacy controller workflow.
+
+Current behavior:
+
+- it prefers `zopfli` when available
+- otherwise it falls back to deterministic `gzip -9 -n`
+
+This is not an optimization gimmick here; it directly affects whether the UI fits the controller.
+
+## Current sensor health UI bridge
+
+The live UI includes a very small read-only debug bridge:
+
+- `html_app/sensor-health.custom.js`
+
+It updates `sensor_health_summary` by polling:
+
+- `sensor_health_status`
+- `sensor_health_last_alert`
+- `sensor_health_period_s`
+- `sensor_health_stuck_samples`
+
+It is intentionally tiny so it stays deployable on the legacy SPIFFS layout.
 
 ## Rule for future changes
 

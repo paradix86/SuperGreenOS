@@ -170,10 +170,11 @@ This repository was successfully built and deployed via OTA from a modern Ubuntu
 
 ## Important
 
-Before every firmware build, regenerate the template-derived sources:
+Before every firmware build, regenerate config, templates, and UI in this order:
 
 ```bash
 cd /home/alan/sources/SuperGreenOS
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
 bash ./update_templates.sh config.controller.json
 bash ./update_htmlapp.sh config.controller.json
 ```
@@ -184,6 +185,8 @@ If you skip this, the build may fail with missing generated files such as:
 - `main/init.c`
 - `main/core/modules.h`
 - `main/core/include_modules.h`
+
+`cue 0.0.8` was used successfully for this generation flow.
 
 ## Python setting used by this repo
 
@@ -217,6 +220,11 @@ releases/SuperGreenMaintenance/last_timestamp
 releases/SuperGreenMaintenance/<timestamp>/firmware.bin
 ```
 
+Verified timestamps include:
+
+- `1773751114`
+- `1773757485`
+
 ## Verified OTA over Wi-Fi
 
 Example verified setup:
@@ -248,6 +256,8 @@ The controller was observed requesting:
 - `/SuperGreenMaintenance/last_timestamp`
 - `/SuperGreenMaintenance/<timestamp>/firmware.bin`
 
+This flow was later reused to deploy the first working `sensor_health` backend to a live controller.
+
 ## Maintenance build caveat
 
 `scripts/build_maintenance_ota.sh` enables a one-time SPIFFS format. This means the controller may boot the new firmware successfully but lose `/fs/app.html` until the web UI is uploaded again.
@@ -259,6 +269,32 @@ cd /home/alan/sources/SuperGreenOS
 bash ./update_htmlapp.sh config.controller.json
 bash ./upload_htmlapp.sh 192.168.1.104 ./spiffs_fs
 ```
+
+## SPIFFS size note
+
+The legacy SPIFFS partition is only `32 KB`, so UI size is a real deployment constraint.
+
+Important practical discoveries:
+
+- duplicated CSS can make `app.html` too large to upload
+- `upload_htmlapp.sh` now prefers `zopfli` when available and falls back to `gzip -9 -n`
+- the current web UI includes a very small `sensor_health` debug bridge because richer JS quickly burns the SPIFFS budget
+
+## Sensor health backend
+
+The repo now includes a first real backend module:
+
+- `main/sensor_health/`
+
+It is generated/configured through:
+
+- `config_gen/config/SuperGreenOS/Controllers/sensor_health.cue`
+
+Verified live controller state included:
+
+- `SENSOR_HEALTH_STATUS = 3`
+- `SENSOR_HEALTH_LAST_ALERT = box_0_co2_stuck`
+- `SENSOR_HEALTH_STUCK_SAMPLES = 5`
 
 This was verified to restore the admin UI after OTA.
 
