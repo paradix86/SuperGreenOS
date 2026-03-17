@@ -26,6 +26,16 @@ SuperGreenOS provides most features used when growing cannabis, all in one packa
 
 It is the official firmware for the [SuperGreenController](https://github.com/supergreenlab/SuperGreenController).
 
+## Documentation
+
+For the practical, maintained documentation set, start here:
+
+- `docs/README.md`
+- `docs/environment-setup.md`
+- `docs/build-and-ota.md`
+- `docs/ui-customization.md`
+- `docs/backend-roadmap.md`
+
 ## Who is this document for
 
 This document is for developpers that want to start playing with there controller's internal stuffs, or just setup their own hardware.
