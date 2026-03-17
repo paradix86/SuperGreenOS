@@ -298,6 +298,57 @@ It polls every 4 seconds and updates the `sensor_health_summary` area from:
 
 It is intentionally tiny so it can fit within the legacy SPIFFS budget.
 
+## MQTT and Home Assistant support
+
+The MQTT implementation used to be mostly a debug/log stream plus signed remote commands.
+
+Current improvement:
+
+- keep existing `broker_channel` log publish unchanged
+- keep `<clientid>.cmd` signed command subscribe unchanged
+- add a Home Assistant-friendly channel alongside it
+
+Current HA topics:
+
+- `supergreen/<clientid>/availability`
+- `supergreen/<clientid>/state`
+- `homeassistant/sensor/<clientid>/<object_id>/config`
+
+Current HA entities published:
+
+- `box_0_temp`
+- `box_0_humi`
+- `box_0_vpd`
+- `box_0_co2`
+- `sensor_health_status`
+- `sensor_health_last_alert`
+
+Current state payload shape:
+
+```json
+{
+  "box_0_temp": 26,
+  "box_0_humi": 44,
+  "box_0_vpd": 1.50,
+  "box_0_co2": 0,
+  "sensor_health_status": 3,
+  "sensor_health_last_alert": "box_0_temp_stuck"
+}
+```
+
+Implementation files:
+
+- `main/core/mqtt/mqtt.c`
+- `main/core/mqtt/mqtt.c.template`
+- `main/core/mqtt/mqtt.h`
+- `main/core/mqtt/mqtt.h.template`
+
+Important scope note:
+
+- this is an MVP for Home Assistant read-side integration
+- it publishes stable state and discovery
+- it does not yet add Home Assistant write/control topics
+
 ## Browser cache pitfall
 
 Even when `app.html` was uploaded successfully, browsers could continue showing the older UI from cache.

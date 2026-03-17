@@ -307,6 +307,44 @@ Verified live controller state included:
 - `SENSOR_HEALTH_LAST_ALERT = box_0_co2_stuck`
 - `SENSOR_HEALTH_STUCK_SAMPLES = 5`
 
+## MQTT and Home Assistant
+
+The legacy MQTT log stream remains unchanged, but the firmware now also publishes a Home Assistant-friendly channel.
+
+Current topics:
+
+- availability: `supergreen/<clientid>/availability`
+- state: `supergreen/<clientid>/state`
+- discovery: `homeassistant/sensor/<clientid>/<object_id>/config`
+
+Current published entities:
+
+- `box_0_temp`
+- `box_0_humi`
+- `box_0_vpd`
+- `box_0_co2`
+- `sensor_health_status`
+- `sensor_health_last_alert`
+
+Current state payload shape:
+
+```json
+{
+  "box_0_temp": 26,
+  "box_0_humi": 44,
+  "box_0_vpd": 1.50,
+  "box_0_co2": 0,
+  "sensor_health_status": 3,
+  "sensor_health_last_alert": "box_0_temp_stuck"
+}
+```
+
+This HA support is additive:
+
+- existing debug/log publish on `broker_channel` stays in place
+- signed command subscribe on `<clientid>.cmd` stays in place
+- HA uses stable topics plus retained discovery, availability, and state
+
 This was verified to restore the admin UI after OTA.
 
 ## See also

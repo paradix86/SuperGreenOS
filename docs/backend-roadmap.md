@@ -101,3 +101,24 @@ When looking for reusable upstream ideas, compare these areas against `SuperGree
 - root generation scripts
 
 Do not treat the boilerplate as an embedded dependency; use it as a selective upstream reference.
+
+## MQTT / Home Assistant MVP
+
+The first Home Assistant-oriented MQTT layer should stay intentionally small and additive.
+
+Current implemented scope:
+
+- retained availability topic: `supergreen/<clientid>/availability`
+- retained state topic: `supergreen/<clientid>/state`
+- retained MQTT discovery topics under `homeassistant/sensor/<clientid>/<object_id>/config`
+
+Current exported entities:
+
+- `box_0_temp`
+- `box_0_humi`
+- `box_0_vpd`
+- `box_0_co2`
+- `sensor_health_status`
+- `sensor_health_last_alert`
+
+This deliberately does not replace the existing MQTT log stream. It adds a Home Assistant-friendly layer next to it.
