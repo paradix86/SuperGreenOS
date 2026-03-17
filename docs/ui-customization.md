@@ -97,8 +97,13 @@ When testing UI changes on the live controller, stale browser cache can masquera
 This repo now mitigates that in firmware by serving SPIFFS files with no-cache headers, but if behavior still looks old:
 
 - use a hard refresh
-- add a cache-busting query string to `/fs/app.html`
 - or use a private/incognito window
+
+Important legacy controller nuance:
+
+- `/fs/app.html?<anything>` is not supported by the old file-serving route
+- adding a query string can return `404`
+- use plain `/fs/app.html`
 
 ## Rule for future changes
 

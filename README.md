@@ -270,6 +270,15 @@ bash ./update_htmlapp.sh config.controller.json
 bash ./upload_htmlapp.sh 192.168.1.104 ./spiffs_fs
 ```
 
+On the legacy SPIFFS controller, the stable restore order is:
+
+1. delete old `/fs/app.html`
+2. delete old `/fs/config.json`
+3. upload new `app.html`
+4. upload new `config.json`
+
+`upload_htmlapp.sh` now follows that order automatically because uploading `config.json` first can leave `app.html` truncated even when the upload reports success.
+
 ## SPIFFS size note
 
 The legacy SPIFFS partition is only `32 KB`, so UI size is a real deployment constraint.
@@ -280,6 +289,7 @@ Important practical discoveries:
 - `upload_htmlapp.sh` now prefers `zopfli` when available and falls back to `gzip -9 -n`
 - the current web UI includes a very small `sensor_health` debug bridge because richer JS quickly burns the SPIFFS budget
 - browsers may cache `/fs/app.html`; the firmware now serves SPIFFS files with `no-cache` headers to reduce stale UI after upload
+- the legacy `/fs/*` route does not support cache-busting query strings like `/fs/app.html?v=123`; use plain `/fs/app.html`
 
 ## Sensor health backend
 

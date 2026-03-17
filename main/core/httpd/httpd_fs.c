@@ -51,6 +51,8 @@ char file_buffer[FILE_BUFSIZE] = {0};
 
 #define SGL_SPIFFS_FORMAT_DONE_KEY "SFSFMT1"
 
+static void set_no_cache_headers(httpd_req_t *req);
+
 /* Send HTTP response with a run-time generated html consisting of
  * a list of all files and folders under the requested path */
 static esp_err_t http_resp_dir_html(httpd_req_t *req)
@@ -83,6 +85,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req)
   }
 
   httpd_resp_set_type(req, "text/plain");
+  set_no_cache_headers(req);
   /* Iterate over all files / folders and fetch their names and sizes */
   while ((entry = readdir(dir)) != NULL) {
     entrytype = (entry->d_type == DT_DIR ? "directory" : "file");
@@ -118,6 +121,13 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req)
 
 #define IS_FILE_EXT(filename, ext) \
   (strcasecmp(&filename[strlen(filename) - sizeof(ext) + 1], ext) == 0)
+
+static void set_no_cache_headers(httpd_req_t *req)
+{
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  httpd_resp_set_hdr(req, "Pragma", "no-cache");
+  httpd_resp_set_hdr(req, "Expires", "0");
+}
 
 /* Set HTTP response content type according to file extension */
 static esp_err_t set_content_type_from_file(httpd_req_t *req)
@@ -165,6 +175,7 @@ static esp_err_t http_resp_file(httpd_req_t *req)
 
   ESP_LOGI(SGO_LOG_NOSEND, "Sending file : %s (%ld bytes)...", filepath, file_stat.st_size);
   set_content_type_from_file(req);
+  set_no_cache_headers(req);
   httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
@@ -259,6 +270,16 @@ esp_err_t upload_post_handler(httpd_req_t *req)
    * deterministic for config.json/app.html refreshes. */
   unlink(filepath);
 
+  /* A zero-byte upload is treated as a delete request. This is useful on
+   * constrained legacy SPIFFS setups where keeping empty placeholder files
+   * still wastes directory metadata. */
+  if (req->content_len == 0) {
+    ESP_LOGI(SGO_LOG_NOSEND, "@FS Deleted file : %s", filename);
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_sendstr(req, "@FS File deleted successfully");
+    return ESP_OK;
+  }
+
   /* File cannot be larger than a limit */
   if (req->content_len > MAX_FILE_SIZE) {
     ESP_LOGE(SGO_LOG_NOSEND, "@FS File too large : %d bytes", req->content_len);
@@ -333,6 +354,36 @@ esp_err_t upload_post_handler(httpd_req_t *req)
   ESP_LOGI(SGO_LOG_NOSEND, "@FS File reception complete");
 
   httpd_resp_sendstr(req, "@FS File uploaded successfully");
+  return ESP_OK;
+}
+
+esp_err_t delete_post_handler(httpd_req_t *req)
+{
+  if (auth_request(req) == false) {
+    return 0;
+  }
+
+  char filepath[FILE_PATH_MAX];
+  const char *filename = req->uri + sizeof("/fs") - 1;
+
+  if (strlen(filename) == 0 || filename[strlen(filename) - 1] == '/') {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Invalid file name : %s", filename);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid file name");
+    return ESP_FAIL;
+  }
+
+  strcpy(filepath, FILE_BASE_PATH);
+  strcat(filepath, filename);
+
+  if (unlink(filepath) != 0) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Failed to delete file : %s", filepath);
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
+    return ESP_FAIL;
+  }
+
+  ESP_LOGI(SGO_LOG_NOSEND, "@FS Deleted file : %s", filepath);
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_sendstr(req, "@FS File deleted successfully");
   return ESP_OK;
 }
 

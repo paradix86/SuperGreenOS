@@ -33,6 +33,7 @@
 
 esp_err_t download_get_handler(httpd_req_t *req);
 esp_err_t upload_post_handler(httpd_req_t *req);
+esp_err_t delete_post_handler(httpd_req_t *req);
 
 /* static size_t get_char_count(const char *uri) {
   size_t i = 0;
@@ -260,7 +261,7 @@ static esp_err_t option_handler(httpd_req_t *req) {
     return 0;
   }
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type,Access-Control-Allow-Origin");
   httpd_resp_send(req, "OK", 2);
   return ESP_OK;
@@ -341,6 +342,13 @@ httpd_uri_t file_upload = {
 	.user_ctx  = NULL
 };
 
+httpd_uri_t file_delete = {
+	.uri       = "/fs/*",
+	.method    = HTTP_DELETE,
+	.handler   = delete_post_handler,
+	.user_ctx  = NULL
+};
+
 httpd_uri_t uri_option = {
   .uri      = "/*",
   .method   = HTTP_OPTIONS,
@@ -356,7 +364,7 @@ static void start_webserver_task(void *args) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.lru_purge_enable = true;
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 9;
+  config.max_uri_handlers = 10;
 
   if (httpd_start(&server, &config) == ESP_OK) {
     httpd_register_uri_handler(server, &uri_geti);
@@ -367,6 +375,7 @@ static void start_webserver_task(void *args) {
     httpd_register_uri_handler(server, &uri_get_ip);
     httpd_register_uri_handler(server, &file_download);
 		httpd_register_uri_handler(server, &file_upload);
+		httpd_register_uri_handler(server, &file_delete);
     httpd_register_uri_handler(server, &uri_option);
   } else {
     ESP_LOGE(SGO_LOG_NOSEND, "Failed to start httpd!");

@@ -256,6 +256,15 @@ Successful responses observed:
 
 - `@FS File uploaded successfully`
 
+Current reliable restore sequence on the legacy controller:
+
+1. delete old `/fs/app.html`
+2. delete old `/fs/config.json`
+3. upload new `app.html`
+4. upload new `config.json`
+
+If `config.json` is uploaded first, `app.html` can appear to upload successfully but still end up truncated in SPIFFS.
+
 ## Legacy SPIFFS size constraints
 
 The controller's SPIFFS partition is only `0x8000` (`32 KB`), so UI size matters.
@@ -298,6 +307,12 @@ Mitigation applied:
 - `main/core/httpd/httpd_fs.c` now sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
 - it also sends `Pragma: no-cache`
 - and `Expires: 0`
+
+Important nuance on this legacy firmware:
+
+- `/fs/app.html?<anything>` is not supported and returns `404`
+- use plain `/fs/app.html`
+- rely on the no-cache headers plus a hard refresh or incognito window if needed
 
 Practical effect:
 

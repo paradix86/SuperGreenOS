@@ -55,5 +55,10 @@ PY
 compress_file "$CONFIG_FILE" "$TMP_DIR/config.json"
 compress_file "$APP_FILE" "$TMP_DIR/app.html"
 
-curl --fail -XPOST --upload-file "$TMP_DIR/config.json" -vvv "http://$NAME/fs/config.json"
+# On the legacy controller SPIFFS, restore is most reliable if we clear the
+# old payload first and then upload app.html before config.json.
+curl -sS -X DELETE "http://$NAME/fs/app.html" >/dev/null || true
+curl -sS -X DELETE "http://$NAME/fs/config.json" >/dev/null || true
+
 curl --fail -XPOST --upload-file "$TMP_DIR/app.html" -vvv "http://$NAME/fs/app.html"
+curl --fail -XPOST --upload-file "$TMP_DIR/config.json" -vvv "http://$NAME/fs/config.json"

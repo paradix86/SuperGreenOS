@@ -89,6 +89,15 @@ Expected response:
 
 - `@FS File uploaded successfully`
 
+On the legacy SPIFFS controller, restore is most reliable in this order:
+
+1. delete old `/fs/app.html`
+2. delete old `/fs/config.json`
+3. upload new `app.html`
+4. upload new `config.json`
+
+`upload_htmlapp.sh` now follows that sequence automatically because `config.json` first can leave `app.html` truncated even when upload returns `200`.
+
 ## Wi-Fi file replacement after OTA
 
 The legacy upload handler originally failed replacing existing SPIFFS files after OTA with:
@@ -125,3 +134,9 @@ Mitigation now present in firmware:
 - `main/core/httpd/httpd_fs.c` sends `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`
 - plus `Pragma: no-cache`
 - plus `Expires: 0`
+
+Legacy route nuance:
+
+- `/fs/app.html?<anything>` is not supported and returns `404`
+- use plain `/fs/app.html`
+- if needed, prefer a hard refresh or incognito window
