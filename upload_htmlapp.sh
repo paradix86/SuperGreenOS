@@ -23,8 +23,10 @@ fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-gzip -c "$CONFIG_FILE" > "$TMP_DIR/config.json"
-gzip -c "$APP_FILE" > "$TMP_DIR/app.html"
+# Use the tightest deterministic gzip stream we can to stay within the
+# controller's legacy upload and SPIFFS limits.
+gzip -9 -n -c "$CONFIG_FILE" > "$TMP_DIR/config.json"
+gzip -9 -n -c "$APP_FILE" > "$TMP_DIR/app.html"
 
 curl --fail -XPOST --upload-file "$TMP_DIR/config.json" -vvv "http://$NAME/fs/config.json"
 curl --fail -XPOST --upload-file "$TMP_DIR/app.html" -vvv "http://$NAME/fs/app.html"

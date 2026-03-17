@@ -153,3 +153,106 @@ https://github.com/cuelang/cue/releases
 ```bash
 cue version 0.0.8 darwin/amd64
 ```
+
+# Modern Linux Notes
+
+This repository was successfully built and deployed via OTA from a modern Ubuntu machine in March 2026, but only after a few compatibility fixes for legacy ESP-IDF `3.3.1`.
+
+## Important
+
+Before every firmware build, regenerate the template-derived sources:
+
+```bash
+cd /home/alan/sources/SuperGreenOS
+bash ./update_templates.sh config.controller.json
+bash ./update_htmlapp.sh config.controller.json
+```
+
+If you skip this, the build may fail with missing generated files such as:
+
+- `main/component.mk`
+- `main/init.c`
+- `main/core/modules.h`
+- `main/core/include_modules.h`
+
+## Python setting used by this repo
+
+On modern Linux, this repo must not force Python 2.
+
+Use:
+
+```text
+CONFIG_PYTHON="python"
+```
+
+in:
+
+- `sdkconfig`
+- `sdkconfig.defaults`
+
+## Verified maintenance OTA build
+
+The following worked on Ubuntu after ESP-IDF setup:
+
+```bash
+export IDF_PATH=$HOME/esp/esp-idf_release_3.3.1
+. $IDF_PATH/export.sh
+bash ./scripts/build_maintenance_ota.sh
+```
+
+Successful output creates:
+
+```text
+releases/SuperGreenMaintenance/last_timestamp
+releases/SuperGreenMaintenance/<timestamp>/firmware.bin
+```
+
+## Verified OTA over Wi-Fi
+
+Example verified setup:
+
+- controller: `192.168.1.104`
+- build host: `192.168.1.151`
+- server port: `8091`
+
+Serve OTA files:
+
+```bash
+cd /home/alan/sources/SuperGreenOS/releases
+python3 -m http.server 8091
+```
+
+Controller OTA settings:
+
+- `server_ip = 192.168.1.151`
+- `server_hostname = 192.168.1.151`
+- `server_port = 8091`
+- `basedir = /SuperGreenMaintenance`
+
+Then trigger OTA by setting:
+
+- `start = 1`
+
+The controller was observed requesting:
+
+- `/SuperGreenMaintenance/last_timestamp`
+- `/SuperGreenMaintenance/<timestamp>/firmware.bin`
+
+## Maintenance build caveat
+
+`scripts/build_maintenance_ota.sh` enables a one-time SPIFFS format. This means the controller may boot the new firmware successfully but lose `/fs/app.html` until the web UI is uploaded again.
+
+If `/fs/app.html` returns `This URI does not exist` after maintenance OTA, restore the UI with:
+
+```bash
+cd /home/alan/sources/SuperGreenOS
+bash ./update_htmlapp.sh config.controller.json
+bash ./upload_htmlapp.sh 192.168.1.104 ./spiffs_fs
+```
+
+This was verified to restore the admin UI after OTA.
+
+## See also
+
+- `README_TEST.md` for safe UI-only testing
+- `Agents.md` for a repo-specific operational log of the setup and OTA findings

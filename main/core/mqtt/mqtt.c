@@ -150,9 +150,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
     case MQTT_EVENT_ERROR:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_ERROR");
       break;
-    case MQTT_EVENT_ANY:
-      ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_ANY");
-      break;
   }
   return ESP_OK;
 }
@@ -292,4 +289,3 @@ void init_mqtt() {
     ESP_LOGE(SGO_LOG_NOSEND, "@MQTT Failed to create task");
   }
 }
-
