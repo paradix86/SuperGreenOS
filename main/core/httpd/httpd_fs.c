@@ -254,11 +254,10 @@ esp_err_t upload_post_handler(httpd_req_t *req)
 
   /* Concatenate the requested file path */
   strcat(filepath, filename);
-  /*if (!stat(filepath, &file_stat) == 0) {
-    ESP_LOGE(SGO_LOG_NOSEND, "File already exists : %s", filepath);
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File already exists");
-    return ESP_FAIL;
-    }*/
+  /* On legacy SPIFFS builds, replacing an existing file via fopen("w")
+   * can fail after OTA. Remove the old file first so the create path is
+   * deterministic for config.json/app.html refreshes. */
+  unlink(filepath);
 
   /* File cannot be larger than a limit */
   if (req->content_len > MAX_FILE_SIZE) {
