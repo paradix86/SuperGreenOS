@@ -957,3 +957,31 @@ Motor sources restored to export values (MOTOR_0_SOURCE=15, MOTOR_1_SOURCE=15 [d
 ### Note on `CMD_MQTT_FORCE_FLUSH` in the loop
 
 The `mqtt_task` loop has no handler for `CMD_MQTT_FORCE_FLUSH` (case 2 was never implemented — it falls through). With the sender removed, the message is never enqueued, so the unhandled case is moot. The `static int CMD_MQTT_FORCE_FLUSH = 2` declaration now generates an unused-variable warning; cleanup is deferred to a separate commit.
+
+### Hardening experiment: drain-cap — REJECTED (2026-03-18)
+
+A follow-on hardening attempt added `#define MAX_LOG_DRAIN_PER_CYCLE 5` to bound the log drain loop in `mqtt_task` to at most 5 `esp_mqtt_client_publish` calls per 10-second cycle (previously unbounded, up to 25). This was intended to reduce residual MQTT outbox pressure.
+
+**It introduced a regression.** Under `BOX_0_ENABLED=1` with a real broker, the controller re-entered the reboot loop immediately (~9-second cycle, identical to the original crash). `N_RESTARTS` incremented 68 times in 10 minutes, then wrapped past 255.
+
+**Bisect result (2026-03-18):**
+
+After reverting the drain cap (restoring the unbounded drain loop), a full 10-minute soak passed cleanly:
+
+| Metric | Value |
+|--------|-------|
+| Firmware `OTA_TIMESTAMP` | `1773865200` |
+| Broker | `mqtt://sink2.supergreenlab.com:1883` (real) |
+| `BOX_0_ENABLED` | `1` |
+| Duration | 600 seconds (200 samples × 3s) |
+| `N_RESTARTS` before/after | `101` / `101` |
+| STATE timeouts | 0 / 200 |
+| Result | **Stable — zero reboots** |
+
+**Root cause of the drain-cap regression (hypothesis):**
+
+With the cap at 5, `log_queue` stays at or near 25/25 permanently. Every call to `mqtt_logging_vprintf` (from any task, through the global log interceptor) goes through the drop path: `xQueueReceive` + `xQueueSend` on a full queue instead of just `xQueueSend` with headroom. Under `BOX_0_ENABLED=1` with multiple tasks logging at high rate, this constant double-queue-operation overhead appears to trigger a crash — exact mechanism (watchdog, stack overflow, heap) unconfirmed without serial logs. The empirical isolation is conclusive.
+
+**Do not re-apply `MAX_LOG_DRAIN_PER_CYCLE` in this form.** Any future drain hardening must avoid keeping the queue permanently full. Safer alternatives: reduce `MAX_LOG_QUEUE_ITEMS`, add an inter-publish delay inside the drain loop, or gate drain on queue depth rather than a fixed per-cycle cap.
+
+**Validated known-good state: `OTA_TIMESTAMP=1773865200`**, unbounded drain loop, force-flush send removed. Currently running on the controller.

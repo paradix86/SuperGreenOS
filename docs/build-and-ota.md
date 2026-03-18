@@ -303,3 +303,13 @@ Important: when capturing `make` exit code, do not pipe `make` output through an
 | Result | **Stable — reboot loop gone** |
 
 See `Agents.md` section "MQTT Reboot Loop — Root Cause, Patch, and Validation" for the isolation path, exact diff, and build notes.
+
+### Hardening experiment: drain-cap — REJECTED (2026-03-18)
+
+A follow-on attempt bounded the log drain loop in `mqtt_task` to 5 publishes per cycle (`MAX_LOG_DRAIN_PER_CYCLE 5`). This immediately reintroduced the reboot loop (~9s cycle, `N_RESTARTS` incremented 68 times in 10 minutes).
+
+Bisect confirmed: reverting the drain cap and rebuilding produced a clean 10-minute soak with zero reboots (`N_RESTARTS` stable at 101/200 samples, `STATE` timeout 0/200, real broker, `BOX_0_ENABLED=1`).
+
+**Do not re-apply `MAX_LOG_DRAIN_PER_CYCLE` in its current form.** Keeping `log_queue` at maximum capacity permanently stresses the drop path in `mqtt_logging_vprintf` (called from every task via the global log interceptor) and causes crashes. The exact failure mode is unconfirmed without serial logs.
+
+Validated known-good state: `OTA_TIMESTAMP=1773865200`, unbounded drain, force-flush send removed.
