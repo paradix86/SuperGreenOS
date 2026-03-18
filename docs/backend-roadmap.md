@@ -118,7 +118,27 @@ Current exported entities:
 - `box_0_humi`
 - `box_0_vpd`
 - `box_0_co2`
+- `box_1_temp`
+- `box_1_humi`
+- `box_1_vpd`
+- `box_1_co2`
+- `box_2_temp`
+- `box_2_humi`
+- `box_2_vpd`
+- `box_2_co2`
 - `sensor_health_status`
+- `sensor_health_status_text`
 - `sensor_health_last_alert`
+- `sensor_health_problem`
+- `box_0_sensor_problem`
+- `box_1_sensor_problem`
+- `box_2_sensor_problem`
+
+Current HA controls exported:
+
+- `button.reboot`
+- `button.ota_start`
+- `switch.sensor_health_enabled`
+- `number.sensor_health_period_s`
 
 This deliberately does not replace the existing MQTT log stream. It adds a Home Assistant-friendly layer next to it.

@@ -320,8 +320,28 @@ Current HA entities published:
 - `box_0_humi`
 - `box_0_vpd`
 - `box_0_co2`
+- `box_1_temp`
+- `box_1_humi`
+- `box_1_vpd`
+- `box_1_co2`
+- `box_2_temp`
+- `box_2_humi`
+- `box_2_vpd`
+- `box_2_co2`
 - `sensor_health_status`
+- `sensor_health_status_text`
 - `sensor_health_last_alert`
+- `sensor_health_problem`
+- `box_0_sensor_problem`
+- `box_1_sensor_problem`
+- `box_2_sensor_problem`
+
+Current HA controls published:
+
+- `button.reboot`
+- `button.ota_start`
+- `switch.sensor_health_enabled`
+- `number.sensor_health_period_s`
 
 Current state payload shape:
 
@@ -331,7 +351,22 @@ Current state payload shape:
   "box_0_humi": 44,
   "box_0_vpd": 1.50,
   "box_0_co2": 0,
+  "box_1_temp": 25,
+  "box_1_humi": 43,
+  "box_1_vpd": 1.44,
+  "box_1_co2": 0,
+  "box_2_temp": 24,
+  "box_2_humi": 46,
+  "box_2_vpd": 1.38,
+  "box_2_co2": 0,
   "sensor_health_status": 3,
+  "sensor_health_status_text": "warn",
+  "sensor_health_problem": "ON",
+  "box_0_sensor_problem": "ON",
+  "box_1_sensor_problem": "OFF",
+  "box_2_sensor_problem": "OFF",
+  "sensor_health_enabled": "ON",
+  "sensor_health_period_s": 60,
   "sensor_health_last_alert": "box_0_temp_stuck"
 }
 ```
@@ -347,7 +382,7 @@ Important scope note:
 
 - this is an MVP for Home Assistant read-side integration
 - it publishes stable state and discovery
-- it does not yet add Home Assistant write/control topics
+- HA control support is intentionally small and currently limited to the controls listed above
 
 ## Browser cache pitfall
 
@@ -389,3 +424,536 @@ For this repo, treat maintenance OTA as a two-step operation:
 2. UI upload via `upload_htmlapp.sh`
 
 Do not assume the maintenance build preserves SPIFFS content.
+
+## Fallback AP recovery details
+
+If the controller comes back on its emergency AP instead of rejoining the LAN:
+
+- SSID: `🤖🍁`
+- password: `multipass`
+- controller address: `192.168.4.1`
+- UI path: `http://192.168.4.1/fs/app.html`
+
+Important nuance:
+
+- the path is `/fs/app.html`, not `/fs/app`
+- local UI upload over the recovery AP does not require internet on the laptop
+
+Verified recovery command over the AP:
+
+```bash
+cd /home/alan/sources/SuperGreenOS
+bash ./upload_htmlapp.sh 192.168.4.1 ./spiffs_fs
+```
+
+If Wi-Fi settings must be restored in the UI:
+
+- go to `System -> wifi`
+- set `wifi_ssid`, save
+- then set `wifi_password`, save
+
+This order matters because `on_set_wifi_ssid()` clears the stored password in `main/core/wifi/wifi.c`.
+
+## Postmortem of the March 2026 maintenance OTA incident
+
+Observed symptoms on the live controller:
+
+- maintenance OTA firmware deployed
+- controller later showed the fallback AP `🤖🍁`
+- `/fs/app.html` was gone until re-uploaded
+- Wi-Fi credentials had to be entered again
+
+Confirmed code behavior behind those symptoms:
+
+- maintenance builds force a one-time SPIFFS format in `main/core/httpd/httpd_fs.c`
+- the reboot guard erases NVS after 5 short reboots in `main/core/reboot/reboot.c`
+- the reboot guard also erases NVS when it detects the old `N_SHORT_REBOOTS` storage type in `main/core/reboot/reboot.c`
+- missing `WIFI_SSID` or `WIFI_PASSWORD` causes fallback to AP mode in `main/core/wifi/wifi.c`
+
+Most likely incident sequence:
+
+1. OTA itself succeeded
+2. first boot of the maintenance image formatted SPIFFS, so the web UI disappeared
+3. the controller then hit several short reboots during early boot
+4. the reboot guard erased NVS
+5. after NVS erase the controller fell back to AP mode and looked factory-reset
+
+What remains unproven:
+
+- the cause of the initial short reboot loop
+
+No serial boot log was captured during the failing first boot, so the initial trigger was not proven. Do not document it as a confirmed MQTT bug, watchdog bug, or power issue without serial evidence.
+
+Additional evidence collected after recovery:
+
+- the recovered controller was observed publishing the extended Home Assistant MQTT payload with `box_1_*`, `box_2_*`, `sensor_health_status_text`, `sensor_health_problem`, and per-box problem flags
+- that payload shape matched the local uncommitted `main/core/mqtt/mqtt.c` worktree at the time, not just the smaller committed `f653f65` MQTT payload
+
+Interpretation:
+
+- the deployed maintenance image was very likely built from a dirty worktree, not from a clean committed snapshot
+- this does not prove the first reboot trigger, but it weakens the case for blaming maintenance OTA alone
+
+Practical takeaway:
+
+- preserve serial logs for the first boot after OTA whenever possible
+- prefer deploying from a clean commit or archived firmware artifact on this legacy controller
+- when creating a release artifact locally, record:
+  - `git rev-parse HEAD`
+  - `git status --short`
+  - `git diff --stat`
+- if a fallback AP appears after OTA, think `SPIFFS formatted` plus possible `NVS erase from short reboot guard`
+
+Recovered live state verified after this incident:
+
+- `OTA_TIMESTAMP = 1773766796`
+- `OTA_STATUS = 0`
+- `WIFI_STATUS = 3`
+- `WIFI_IP = 192.168.1.104`
+
+Recommended future hardening:
+
+- do not erase the whole NVS store after only 5 short reboots on a field controller
+- preserve at least Wi-Fi credentials and user configuration during automatic recovery
+
+---
+
+## Controller API Behavior
+
+Confirmed via firmware code (`main/core/httpd/httpd.c`) and live testing against `192.168.1.104`.
+
+### GET `/i?k=KEY`
+
+- returns **raw integer text only** — e.g. `2`, not `v=2`, not JSON
+- returns HTTP 404 if the key name is not found in `kv_mapping.c`
+- returns `0` if the key exists in `kv_mapping.c` but has `getter = NULL` — this is an artifact, not the actual NVS value
+- never assume `v=...` format in scripts or parsers
+
+### POST `/i?k=KEY&v=VALUE`
+
+- returns `OK` on success
+- key must exist in `kv_mapping.c` with a non-NULL setter to be writable
+- if key has `setter = NULL`, POST returns an error or is silently ignored
+
+### Key writability
+
+Whether a key is writable via POST is determined solely by whether it has a setter in `kv_mapping.c`.
+The `write: True/False` field in `spiffs_fs/config.json` maps directly to setter presence — it is a reliable shorthand for writability without reading C code.
+
+Confirmed read-only (setter = NULL — must never be replayed):
+- `BOX_N_BLOWER_DUTY` — computed by `blower_task`
+- `BOX_N_FAN_DUTY` — computed by `fan_task`
+- `BOX_N_TIMER_OUTPUT` — computed by `onoff_task`
+- `MOTOR_N_DUTY` — computed by `motor_task` from source routing
+- `LED_N_GPIO` — both getter and setter are NULL; GET returns 0 as artifact, not actual GPIO
+
+Confirmed writable (setter present):
+- `STATE`, `BOX_N_ENABLED`, `BOX_N_TIMER_TYPE`
+- `BOX_N_ON_HOUR`, `BOX_N_ON_MIN`, `BOX_N_OFF_HOUR`, `BOX_N_OFF_MIN`
+- `LED_N_BOX`, `LED_N_TYPE`, `LED_N_DIM`, `LED_N_FADE`, `LED_N_DUTY`
+- `BOX_N_FAN_MIN`, `BOX_N_FAN_MAX`, `BOX_N_FAN_REF_MIN`, `BOX_N_FAN_REF_MAX`, `BOX_N_FAN_REF_SOURCE`
+- `BOX_N_BLOWER_MIN`, `BOX_N_BLOWER_MAX`, `BOX_N_BLOWER_REF_MIN`, `BOX_N_BLOWER_REF_MAX`, `BOX_N_BLOWER_REF_SOURCE`
+- `MOTORS_CURVE`, `MOTOR_N_MIN`, `MOTOR_N_MAX`, `MOTOR_N_SOURCE`, `MOTOR_N_DUTY_TESTING`
+
+---
+
+## Recovery Notes — Confirmed Findings
+
+### NVS erase behavior
+
+After a full NVS erase (triggered by the reboot guard in `main/core/reboot/reboot.c` after ≥5 short reboots):
+
+- `STATE` defaults to `0` (`FIRST_RUN`) — confirmed in `kv.c:238`
+- `LED_N_BOX` defaults to `-1` for all 6 channels — confirmed in `kv.c:448`
+- `BOX_N_ENABLED` defaults to `0`
+- `BOX_N_TIMER_TYPE` defaults to `0` (`TIMER_MANUAL`)
+- All motor MIN/MAX default to 0/100; all motor SOURCEs default to their kv.c initial values
+
+The controller will respond to HTTP normally but produce zero output until config is restored.
+
+### Why the controller appears online but inert after NVS erase
+
+Three independent blockers are all active simultaneously after NVS erase:
+
+1. `STATE = FIRST_RUN (0)` — `mixer_task` checks `get_state() != RUNNING` and sleeps immediately, skipping all LED output
+2. `BOX_N_TIMER_TYPE = TIMER_MANUAL (0)` — `mixer_task` skips boxes with `get_box_timer_type(i) == TIMER_MANUAL`
+3. `LED_N_BOX = -1` — `set_all_duty()` in `mixer.c` filters LEDs by box assignment; `-1` matches no box
+
+All three must be corrected before LEDs will respond.
+
+### Lighting root cause confirmed
+
+`BOX_0_TIMER_OUTPUT = 100` while `LED_0_DUTY = 0` was caused by `LED_N_BOX = -1`.
+
+The `set_all_duty()` function in `mixer.c` iterates all LED channels and skips any where `get_led_box(i) != boxId`. With `LED_N_BOX = -1`, all 6 channels are skipped.
+
+Fix: `POST /i?k=LED_N_BOX&v=0` for N = 0..5 (whichever channels belong to box 0).
+
+### Exported JSON as recovery source
+
+A config export from the Android app (JSON) is the most reliable recovery source after NVS erase.
+
+Known export file for this controller:
+- `/home/alan/Scaricati/supergreenos-config-2026-03-15T08-08-46-643Z.json`
+
+This file contains all 291 config keys. It includes both writable config keys and runtime/computed keys that must not be replayed.
+
+---
+
+## Android App Recovery Notes
+
+Package: `com.supergreenlab.app2`
+
+### What was confirmed
+
+- `android:allowBackup="false"` is set in the app manifest — ADB backup is explicitly blocked
+- `adb shell run-as com.supergreenlab.app2` fails on release builds with "package not debuggable"
+- the app DB is at `getApplicationDocumentsDirectory()/db.sqlite` → resolves to `/data/data/com.supergreenlab.app2/app_flutter/db.sqlite` — unreachable without root
+- the Settings page has no export/import/backup UI whatsoever
+- `ShareExtend.share` in the app is used only for media files and plant public links, not device config
+
+### Practical conclusion
+
+Android app DB extraction is not a practical recovery path without root access on a release build.
+
+The app UI display (while the controller is reachable) can still be used as a read-only reference to cross-check cached parameter values. After NVS erase, the app cache will reflect the pre-erase config and can guide manual restoration.
+
+---
+
+## Safe Config Replay Rules
+
+When replaying config from an exported JSON:
+
+### Always exclude (runtime/computed — never writable)
+
+- `BOX_N_TEMP`, `BOX_N_HUMI`, `BOX_N_VPD`, `BOX_N_CO2`, `BOX_N_WEIGHT`
+- `BOX_N_TIMER_OUTPUT` and all derived timer outputs
+- `BOX_N_FAN_DUTY`, `BOX_N_BLOWER_DUTY`
+- `MOTOR_N_DUTY`, `MOTOR_N_DUTY_TESTING` (when restoring — this is a diagnostic tool, not config)
+- All timestamps: `started_at`, `watering_last`, `simulated_time`
+- Runtime/system keys: `wifi_*`, `ip_*`, `reboot`, `ota_*`, `time`
+
+### Prefer diff-only replay
+
+Read the live controller value first, compare to desired value, only POST if different. This avoids unnecessary NVS writes and makes the script output auditable.
+
+### Phase the replay
+
+1. Core state (`STATE`, `BOX_N_ENABLED`, `BOX_N_TIMER_TYPE`)
+2. Lighting mapping (`LED_N_BOX`, `LED_N_TYPE`)
+3. Schedule (`BOX_N_ON_HOUR/MIN`, `BOX_N_OFF_HOUR/MIN`)
+4. Fan and blower config (`*_MIN`, `*_MAX`, `*_REF_*`)
+5. Motor MIN/MAX only
+6. Motor SOURCE and MOTORS_CURVE — separately, with physical verification
+
+### Recovery scripts
+
+Two scripts maintained in the repo root:
+
+- `compare_and_restore.sh` — diff-only Phase 1 restore (lighting, schedule, fan, blower, motor bounds)
+- `verify_restore.sh` — reads back all restored keys plus computed outputs for confirmation
+
+---
+
+## Lighting Recovery Rules
+
+Minimum keys to restore for lighting to function after NVS erase:
+
+| Key | Required value | Why |
+|-----|---------------|-----|
+| `STATE` | `2` | mixer_task skips all output when STATE ≠ RUNNING |
+| `BOX_0_ENABLED` | `1` | mixer_task skips disabled boxes |
+| `BOX_0_TIMER_TYPE` | `1` | TIMER_MANUAL (0) causes mixer to skip the box |
+| `LED_0_BOX..LED_N_BOX` | `0` (or correct box id) | -1 default causes set_all_duty to skip all LEDs |
+
+Verification: after setting these, `BOX_0_TIMER_OUTPUT` should be 100 (if schedule is within on hours) and `LED_N_DUTY` should be non-zero.
+
+`BOX_0` in firmware corresponds to "Box 1" in the Android app UI.
+
+---
+
+## Motor / Blower / Fan Recovery Rules
+
+### Blower and fan
+
+- `BOX_N_BLOWER_DUTY` and `BOX_N_FAN_DUTY` are computed by `blower_task` and `fan_task` respectively — they are not writable
+- Restore the tuning parameters: `BLOWER_MIN`, `BLOWER_MAX`, `BLOWER_REF_MIN`, `BLOWER_REF_MAX`, `BLOWER_REF_SOURCE`
+- `blower_task` runs every 10 seconds; wait at least 15 seconds after writing blower config before reading `BOX_N_BLOWER_DUTY` to see the updated computed value
+
+### Motors
+
+- `MOTOR_N_SOURCE` routes motor N to a blower/fan/watering duty signal (or 0 for duty_testing mode)
+- `get_motor_N_duty()` in `kv_helpers.c` is a switch on source value: `case 1` = box0 blower, `case 2` = box1 blower, `case 15` = box0 fan, etc.; unrecognized source values fall through to `return 0`
+- `MOTORS_CURVE = 1` applies `duty = 8*pow(1.025, input)+5` before scaling by MIN/MAX; this significantly amplifies the output compared to CURVE=0
+- `source = 0` is the duty_testing mode: motor directly uses `MOTOR_N_DUTY_TESTING` value, bypassing source routing and the curve
+- the motor_task loop runs every 10 seconds; PWM changes take up to 10 seconds to apply
+
+### Motor restore order
+
+1. Restore `MOTOR_N_MIN` and `MOTOR_N_MAX` first (safe — only sets scaling bounds)
+2. Restore `MOTORS_CURVE` second, with physical verification
+3. Restore `MOTOR_N_SOURCE` last, one motor at a time, confirming physical behavior at each step
+
+Do not restore multiple motor SOURCEs simultaneously.
+
+---
+
+## Output-Triggered Reboot Loop — Current Leading Hypothesis
+
+**Status: leading hypothesis, not confirmed fact. No serial log or voltage probe data was captured.**
+
+### Observed behavior (March 2026)
+
+- after Phase 1 config restore, enabling `BOX_0_ENABLED=1` caused a repeating boot loop
+- each cycle: lights on, blowers briefly spin, then reset with a "beep" sound, repeat
+- setting `BOX_0_ENABLED=0` immediately stabilized the controller
+- isolating `MOTOR_0_SOURCE=0` with `MOTOR_0_DUTY_TESTING=0` while re-enabling `BOX_0_ENABLED=1` kept the controller stable for >15 seconds
+- setting `MOTOR_0_DUTY_TESTING=5` (5% raw PWM to motor 0) triggered a reboot within the motor_task cycle (~10 seconds)
+
+### Interpretation
+
+The evidence strongly suggests motor 0 drawing current causes a voltage drop that triggers the ESP32 brownout detector (`CONFIG_BROWNOUT_DET=y`, level 0 ≈ 2.43V threshold, confirmed in `sdkconfig`).
+
+### Why MOTORS_CURVE matters here
+
+With `MOTORS_CURVE=1` (current live value, not original config) and a blower duty of 15:
+- motor PWM ≈ `8 * pow(1.025, 15) + 5` ≈ **22%**
+
+With `MOTORS_CURVE=0` (value from the exported JSON, the original config) and the same blower duty:
+- motor PWM = `MOTOR_MIN + (MOTOR_MAX - MOTOR_MIN) * 15 / 100` = `8 + (51-8)*0.15` ≈ **14%**
+
+The original working config produced ~14% PWM. The current mismatch produces ~22% PWM. This additional load may be what crosses the brownout threshold.
+
+### What remains unconfirmed
+
+- whether the power supply is underpowered vs a motor hardware fault vs the MOTORS_CURVE mismatch being the sole cause
+- whether the "beep" is a boot buzzer, motor controller chirp, or something else
+- no serial log was captured during the loop
+
+### Recommended next step (not yet executed)
+
+Restore `MOTORS_CURVE=0` first (matching original config), then restore `MOTOR_0_SOURCE=1`. This matches the known-working pre-incident state and reduces motor PWM from ~22% to ~14%.
+
+---
+
+## Staged Recovery Procedure
+
+For future NVS-erase recovery events:
+
+### Phase 1 — Core and lighting (safe, no physical risk)
+
+```bash
+# Minimum viable lighting restore
+POST STATE=2
+POST BOX_0_ENABLED=1
+POST BOX_0_TIMER_TYPE=1
+POST LED_0_BOX=0 .. LED_5_BOX=0  # whichever channels are used
+POST LED_0_TYPE=0 .. LED_5_TYPE=0
+
+# Schedule
+POST BOX_0_ON_HOUR=<value>
+POST BOX_0_OFF_HOUR=<value>
+# (ON_MIN / OFF_MIN if not 0)
+```
+
+Verify: `BOX_0_TIMER_OUTPUT` should be 100 (if within schedule), `LED_N_DUTY` should match.
+
+### Phase 2 — Blower and fan tuning (safe)
+
+```bash
+POST BOX_0_BLOWER_MIN / MAX / REF_MIN / REF_MAX / REF_SOURCE
+POST BOX_0_FAN_MIN / MAX / REF_MIN / REF_MAX / REF_SOURCE
+```
+
+Wait 15s, verify `BOX_0_BLOWER_DUTY` and `BOX_0_FAN_DUTY` are non-zero and within expected range.
+
+### Phase 3 — Motor bounds (safe)
+
+```bash
+POST MOTOR_0_MIN / MAX
+POST MOTOR_1_MIN / MAX
+POST MOTOR_2_MIN / MAX
+```
+
+### Phase 4 — Motor curve and source routing (risky — physical verification required)
+
+```bash
+# 1. Restore MOTORS_CURVE first
+POST MOTORS_CURVE=<value from JSON>
+
+# 2. Restore motor sources one at a time
+POST MOTOR_0_SOURCE=<value>
+# observe physical behavior
+POST MOTOR_1_SOURCE=<value>
+# observe physical behavior
+POST MOTOR_2_SOURCE=<value>
+# observe physical behavior
+```
+
+If enabling a motor source causes a reboot loop:
+1. Catch the controller during a boot window (poll `GET /i?k=STATE` repeatedly)
+2. Immediately `POST /i?k=MOTOR_N_SOURCE&v=<disabled-source>` to revert
+3. Stabilize before investigating further
+
+---
+
+## Known Pitfalls for Future Agents
+
+- **Never assume `GET /i?k=KEY` returns `v=...`** — it returns raw integer text
+- **Never assume `LED_N_GPIO` GET returns the actual GPIO** — getter is NULL; returns 0 as artifact
+- **Never assume app-visible settings equal live controller state** — the app caches values and does not sync unless `needsRefresh=true`
+- **Never replay `BOX_N_BLOWER_DUTY`, `BOX_N_FAN_DUTY`, or `BOX_N_TIMER_OUTPUT`** — these are computed/read-only
+- **Never replay timestamps or runtime keys** — `started_at`, `watering_last`, OTA keys, wifi keys
+- **Never change multiple motor SOURCEs at once** — isolate and verify one at a time
+- **Never describe the output-triggered reboot loop as a confirmed brownout** — it is a leading hypothesis; no serial log or voltage data was captured
+- **`spiffs_fs/*` is generated/uploaded output** — the source of truth for UI is `html_app/*`; do not edit `spiffs_fs/app.html` directly
+- **`BOX_0` in firmware = "Box 1" in the app UI** — zero-indexed internally, one-indexed in UX
+- **`motor_task` runs every 10 seconds** — duty changes take up to 10s to apply; always wait before reading back computed outputs
+- **`blower_task` runs every 10 seconds** — same waiting rule applies to `BOX_N_BLOWER_DUTY` and `BOX_N_FAN_DUTY`
+- **`MOTORS_CURVE=1` amplifies motor duty significantly** (`8*pow(1.025,x)+5`) — original config used `CURVES=0`; restoring curve first is safer than restoring source first
+
+---
+
+## Recommended Docs to Keep in Sync
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Human-facing onboarding and quick notes |
+| `Agents.md` | Agent-facing operational rules and confirmed findings |
+| `docs/build-and-ota.md` | OTA workflow, SPIFFS, UI restore, reboot postmortem |
+| `docs/config-recovery.md` | Config-loss recovery procedure and incident detail |
+| `docs/backend-roadmap.md` | Planned backend modules and integration roadmap |
+| `docs/environment-setup.md` | Build environment setup for modern Linux |
+
+When adding firmware features or completing recovery investigations, update `Agents.md` with confirmed findings and `docs/config-recovery.md` with the detailed procedure.
+
+---
+
+## Current Session Snapshot (2026-03-18)
+
+Controller: `192.168.1.104`
+
+### Confirmed live state
+
+| Key | Value | Notes |
+|-----|-------|-------|
+| `STATE` | 2 | RUNNING |
+| `BOX_0_ENABLED` | 1 | Box active |
+| `BOX_0_TIMER_TYPE` | 1 | ONOFF schedule |
+| `BOX_0_TIMER_OUTPUT` | 100 | Within on-hours |
+| `LED_0..5_DUTY` | 100 | Lighting fully restored |
+| `LED_0..5_BOX` | 0 | Correctly mapped |
+| `BOX_0_BLOWER_DUTY` | 15 | Restored after Phase 1 |
+| `BOX_0_FAN_DUTY` | 20 | Restored after Phase 1 |
+| `MOTOR_0_SOURCE` | 0 | In duty_testing mode (diagnostic) |
+| `MOTOR_0_DUTY_TESTING` | 0 | Motor 0 at 0% PWM — physically stopped |
+| `MOTOR_1_SOURCE` | 2 | Points to box1 blower (disabled) → 0% |
+| `MOTOR_2_SOURCE` | 3 | Points to box2 blower (disabled) → 0% |
+| `MOTORS_CURVE` | 1 | Not yet restored to JSON value (0) |
+
+### Phase 1 complete
+
+Lighting, schedule, fan, blower, motor bounds all restored from JSON. 17 keys changed, 0 errors.
+
+### Phase 2 complete (2026-03-18)
+
+All motor sources and curve restored after MQTT patch was validated:
+
+| Key | Restored value | Notes |
+|-----|---------------|-------|
+| `MOTORS_CURVE` | 0 | No curve amplification |
+| `MOTOR_0_SOURCE` | 15 (fan) | Motor 0 physically connected |
+| `MOTOR_1_SOURCE` | 15 (fan) | Motor 1 physically disconnected — safe, no current |
+| `MOTOR_2_SOURCE` | 1 (blower) | Motor 2 physically connected |
+
+All 39 config keys verified against 2026-03-15 export. Controller stable for 66s at 22 samples with motors active.
+
+---
+
+## MQTT Reboot Loop — Root Cause, Patch, and Validation (2026-03-18)
+
+### Symptoms
+
+With a reachable MQTT broker and `BOX_0_ENABLED=1`, the controller enters a reboot loop with a ~9-second period: lights briefly on, blowers start, audible "beep", reset, repeat. `N_RESTARTS` increments on each cycle.
+
+The same loop occurred on the old unpatched firmware even with `BOX_0_ENABLED=0` once MQTT connected. An earlier observation that "BOX_0_ENABLED=0 + real broker → stable" was a **false positive from insufficient monitoring duration** and must not be relied on.
+
+### Hardware vs software isolation path
+
+1. Motor 0 caused brownout at ~14% PWM → physically disconnected
+2. Motor 1 also disconnected
+3. Loop continued with both motors isolated → motor hardware not the sole cause
+4. `MOTORS_CURVE=0` set → loop continued → curve amplification not the cause
+5. `BOX_0_ENABLED=0` set → loop continued with real broker → LED/blower load not the cause
+6. Broker set to `mqtt://127.0.0.1:1883` (unreachable) with `BOX_0_ENABLED=1` → **stable 60s, zero reboots**
+
+Step 6 was decisive: same LED and blower load, same firmware, only the MQTT active path removed.
+
+### Leading hypothesis for the crash mechanism
+
+`esp_log_set_vprintf(mqtt_logging_vprintf)` intercepts every firmware log message. For messages matching `SGO_LOG_MSG`, `SGO_LOG_EVENT`, or `SGO_LOG_METRIC`, `mqtt_logging_vprintf` pushes to `log_queue` **and** sends `CMD_MQTT_FORCE_FLUSH` to the mqtt_task command queue (capacity 10).
+
+With `BOX_0_ENABLED=1`, four or more tasks (mixer, timer, blower, motor, sensor_health) become active simultaneously and log at a high rate. The leading hypothesis is that each `CMD_MQTT_FORCE_FLUSH` wakes `mqtt_task`, which drains `log_queue` by calling `esp_mqtt_client_publish` in a tight loop. The MQTT client's internal outbox overflows, triggering a panic or heap fault → reset.
+
+**The exact internal failure mode (heap corruption, MQTT client assertion, task stack overflow) is unconfirmed without serial logs.** The `mqtt_logging_vprintf` → `CMD_MQTT_FORCE_FLUSH` active path is the confirmed trigger category; the precise crash instruction is not.
+
+The ~9s crash timing: WiFi + TCP connection ≈ 4-6s → `MQTT_EVENT_CONNECTED` fires → `mqtt_publish_ha_state()` publishes immediately → all tasks now active and logging → flood begins → crash within 1-2s.
+
+### Patch applied
+
+Removed the immediate `CMD_MQTT_FORCE_FLUSH` `xQueueSend` call in `mqtt_logging_vprintf` (`main/core/mqtt/mqtt.c` and `main/core/mqtt/mqtt.c.template`).
+
+Before:
+```c
+xQueueSend(log_queue, buf_in, 0);
+if (cmd/* && uxQueueMessagesWaiting(log_queue) > 5*/) {
+  xQueueSend(cmd, &CMD_MQTT_FORCE_FLUSH, 0);
+}
+return vprintf(str, l);
+```
+
+After:
+```c
+xQueueSend(log_queue, buf_in, 0);
+return vprintf(str, l);
+```
+
+Effect:
+- Log messages still accumulate in `log_queue` (max 25 items, oldest dropped on overflow)
+- `mqtt_task` drains them on its natural 10-second cycle — no per-message wakeup
+- HA state publish (on connect + every 30s) and HA discovery are unaffected
+- Log forwarding continues — batched every ~10s instead of real-time per-message
+
+### Build prerequisite: `remove_key` in KV templates
+
+A pre-existing call to `remove_key()` in `main/core/reboot/reboot.c:51` (added in a prior NVS recovery session, unrelated to the MQTT fix) caused a compile error. The function was missing from the KV system. It was added to the tracked template sources (`kv.c.template`, `kv.h.template`) not to generated files, so it survives `update_templates.sh` regeneration. The implementation uses `kv_handle` (the global `nvs_handle` in `kv.c`) and calls `nvs_erase_key` + `nvs_commit`, matching the pattern of every other KV setter.
+
+### OTA delivery notes
+
+- Use firmware-only OTA (`make -j4` directly), not `build_maintenance_ota.sh` (which forces SPIFFS format and erases UI)
+- Do NOT run `update_htmlapp.sh` for firmware-only validation builds
+- Stabilize the controller (set broker to `mqtt://127.0.0.1:1883`) BEFORE triggering OTA on the old firmware — the unpatched firmware crashes within ~9s of MQTT connecting, aborting mid-download
+- Capture `make` exit code correctly: `make ... >/tmp/build.log 2>&1; echo "EXIT:$?"` — piping through `tail` or `tee` captures the pipe's exit code, not `make`'s
+- `GET /i?k=KEY` returns raw integer text only (no `v=` wrapper, no JSON)
+
+### Validated result (2026-03-18)
+
+| Metric | Value |
+|--------|-------|
+| Patched `OTA_TIMESTAMP` | `1773839011` |
+| Broker | `mqtt://sink2.supergreenlab.com:1883` (real) |
+| `BOX_0_ENABLED` | `1` |
+| Duration | 66 seconds (22 samples × 3s) |
+| `LED_0_DUTY` | `100` |
+| `BOX_0_BLOWER_DUTY` | `15` |
+| `MOTOR_0_DUTY` | `30` (SOURCE=15 active) |
+| `MOTOR_2_DUTY` | `15` (SOURCE=1 active) |
+| `N_RESTARTS` before/after | `98` / `98` |
+| STATE timeouts | 0 / 22 |
+| Result | **Stable — reboot loop gone** |
+
+Motor sources restored to export values (MOTOR_0_SOURCE=15, MOTOR_1_SOURCE=15 [disconnected], MOTOR_2_SOURCE=1). All 39 config keys match the 2026-03-15 export.
+
+### Note on `CMD_MQTT_FORCE_FLUSH` in the loop
+
+The `mqtt_task` loop has no handler for `CMD_MQTT_FORCE_FLUSH` (case 2 was never implemented — it falls through). With the sender removed, the message is never enqueued, so the unhandled case is moot. The `static int CMD_MQTT_FORCE_FLUSH = 2` declaration now generates an unused-variable warning; cleanup is deferred to a separate commit.

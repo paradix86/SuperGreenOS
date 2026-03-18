@@ -279,6 +279,19 @@ On the legacy SPIFFS controller, the stable restore order is:
 
 `upload_htmlapp.sh` now follows that order automatically because uploading `config.json` first can leave `app.html` truncated even when the upload reports success.
 
+If the controller falls back to its emergency AP after OTA:
+
+- SSID: `🤖🍁`
+- password: `multipass`
+- address: `192.168.4.1`
+- UI path: `http://192.168.4.1/fs/app.html`
+
+That local recovery does not require internet access on the laptop, only a connection to the controller AP.
+
+If Wi-Fi credentials need to be re-entered, set `wifi_ssid` first and `wifi_password` second. The firmware clears the stored password whenever `wifi_ssid` changes.
+
+One March 2026 maintenance OTA incident also showed that a short reboot loop can end in a full NVS erase on this legacy controller, which makes it look factory-reset and pushes it back to the `🤖🍁` AP. See `docs/build-and-ota.md` for the full postmortem and recovery notes.
+
 ## SPIFFS size note
 
 The legacy SPIFFS partition is only `32 KB`, so UI size is a real deployment constraint.
@@ -323,8 +336,28 @@ Current published entities:
 - `box_0_humi`
 - `box_0_vpd`
 - `box_0_co2`
+- `box_1_temp`
+- `box_1_humi`
+- `box_1_vpd`
+- `box_1_co2`
+- `box_2_temp`
+- `box_2_humi`
+- `box_2_vpd`
+- `box_2_co2`
 - `sensor_health_status`
+- `sensor_health_status_text`
 - `sensor_health_last_alert`
+- `sensor_health_problem`
+- `box_0_sensor_problem`
+- `box_1_sensor_problem`
+- `box_2_sensor_problem`
+
+Current HA controls published:
+
+- `button.reboot`
+- `button.ota_start`
+- `switch.sensor_health_enabled`
+- `number.sensor_health_period_s`
 
 Current state payload shape:
 
@@ -334,7 +367,22 @@ Current state payload shape:
   "box_0_humi": 44,
   "box_0_vpd": 1.50,
   "box_0_co2": 0,
+  "box_1_temp": 25,
+  "box_1_humi": 43,
+  "box_1_vpd": 1.44,
+  "box_1_co2": 0,
+  "box_2_temp": 24,
+  "box_2_humi": 46,
+  "box_2_vpd": 1.38,
+  "box_2_co2": 0,
   "sensor_health_status": 3,
+  "sensor_health_status_text": "warn",
+  "sensor_health_problem": "ON",
+  "box_0_sensor_problem": "ON",
+  "box_1_sensor_problem": "OFF",
+  "box_2_sensor_problem": "OFF",
+  "sensor_health_enabled": "ON",
+  "sensor_health_period_s": 60,
   "sensor_health_last_alert": "box_0_temp_stuck"
 }
 ```
@@ -346,6 +394,18 @@ This HA support is additive:
 - HA uses stable topics plus retained discovery, availability, and state
 
 This was verified to restore the admin UI after OTA.
+
+## Config recovery after NVS erase
+
+The controller stores all configuration in NVS (non-volatile storage). A reboot loop can silently erase NVS and leave the controller online but inert — lights off, motors stopped — even though it responds to HTTP requests.
+
+Key facts:
+- an exported JSON config file is the preferred recovery source; see `docs/config-recovery.md`
+- the Android app (`com.supergreenlab.app2`) cannot be used for DB extraction without root; `allowBackup=false` blocks ADB backup
+- if re-enabling outputs causes repeated reboots with a "beep", suspect motor load-triggered brownout before assuming firmware failure
+- recover lighting and schedule first, then verify, then attempt motor/blower restore
+
+See [`docs/config-recovery.md`](docs/config-recovery.md) for the full procedure.
 
 ## See also
 
