@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$ROOT_DIR"
 
+echo "Checking repository state..."
+git rev-parse HEAD
+git status --short
+git diff --stat
+
+if [[ -n $(git status --porcelain) ]]; then
+  echo ""
+  echo "ERROR: Git worktree is dirty. Commit or stash changes before building."
+  exit 1
+fi
+
 HTTPD_FS_FILE="main/core/httpd/httpd_fs.c"
 OTA_H_FILE="main/core/ota/ota.h"
 
