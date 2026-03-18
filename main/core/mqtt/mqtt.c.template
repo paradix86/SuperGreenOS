@@ -146,6 +146,7 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 #define HA_TOPIC_PREFIX "supergreen"
 #define HA_DISCOVERY_PREFIX "homeassistant"
 #define HA_STATE_PUBLISH_PERIOD_MS (30 * 1000)
+#define HA_DISCOVERY_PUBLISH_DELAY_MS 75
 
 #define MAX_LOG_QUEUE_ITEMS 25
 static uint8_t buf_out[MAX_QUEUE_ITEM_SIZE] = {0};
@@ -162,6 +163,10 @@ static void build_ha_availability_topic(char *dest, size_t len, const char *clie
   snprintf(dest, len, "%s/%s/availability", HA_TOPIC_PREFIX, client_id);
 }
 
+static void build_ha_command_topic(char *dest, size_t len, const char *client_id, const char *command) {
+  snprintf(dest, len, "%s/%s/command/%s", HA_TOPIC_PREFIX, client_id, command);
+}
+
 static void mqtt_publish_message(const char *topic, const char *payload, int retain) {
   if (!connected || client == NULL || strlen(topic) == 0) {
     return;
@@ -169,10 +174,42 @@ static void mqtt_publish_message(const char *topic, const char *payload, int ret
   esp_mqtt_client_publish(client, topic, payload, 0, 0, retain);
 }
 
+static void mqtt_discovery_pause() {
+  vTaskDelay(pdMS_TO_TICKS(HA_DISCOVERY_PUBLISH_DELAY_MS));
+}
+
 static void mqtt_publish_ha_availability(const char *client_id, const char *state) {
   char topic[MAX_KVALUE_SIZE] = {0};
   build_ha_availability_topic(topic, sizeof(topic), client_id);
   mqtt_publish_message(topic, state, 1);
+}
+
+static const char *sensor_health_status_to_text(int status) {
+  switch (status) {
+    case 1:
+      return "ok";
+    case 2:
+      return "warmup";
+    case 3:
+      return "warn";
+    case 4:
+      return "alert";
+    default:
+      return "unknown";
+  }
+}
+
+static const char *sensor_health_problem_to_text(int status) {
+  return status >= 3 ? "ON" : "OFF";
+}
+
+static const char *box_sensor_problem_to_text(const char *alert, int box) {
+  char prefix[16] = {0};
+  snprintf(prefix, sizeof(prefix), "box_%d_", box);
+  if (alert != NULL && strstr(alert, prefix) == alert) {
+    return "ON";
+  }
+  return "OFF";
 }
 
 static void mqtt_publish_ha_config(
@@ -220,20 +257,225 @@ static void mqtt_publish_ha_config(
   mqtt_publish_message(topic, payload, 1);
 }
 
+static void mqtt_publish_ha_binary_config(
+    const char *client_id,
+    const char *object_id,
+    const char *name,
+    const char *value_template,
+    const char *device_class) {
+  char topic[160] = {0};
+  char payload[720] = {0};
+  char state_topic[MAX_KVALUE_SIZE] = {0};
+  char availability_topic[MAX_KVALUE_SIZE] = {0};
+  char device_name[64] = {0};
+  char class_part[64] = {0};
+
+  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
+  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
+  build_ha_device_name(device_name, sizeof(device_name), client_id);
+  snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+
+  if (device_class && strlen(device_class) != 0) {
+    snprintf(class_part, sizeof(class_part), ",\"device_class\":\"%s\"", device_class);
+  }
+
+  snprintf(payload, sizeof(payload),
+      "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
+      "\"availability_topic\":\"%s\",\"value_template\":\"%s\","
+      "\"payload_on\":\"ON\",\"payload_off\":\"OFF\"%s,"
+      "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
+      "\"manufacturer\":\"SuperGreenLab\",\"model\":\"Automation Controller V3\"}}",
+      name,
+      client_id,
+      object_id,
+      state_topic,
+      availability_topic,
+      value_template,
+      class_part,
+      client_id,
+      device_name);
+  mqtt_publish_message(topic, payload, 1);
+}
+
+static void mqtt_publish_ha_switch_config(
+    const char *client_id,
+    const char *object_id,
+    const char *name,
+    const char *command,
+    const char *value_template) {
+  char topic[160] = {0};
+  char payload[800] = {0};
+  char state_topic[MAX_KVALUE_SIZE] = {0};
+  char availability_topic[MAX_KVALUE_SIZE] = {0};
+  char command_topic[MAX_KVALUE_SIZE] = {0};
+  char device_name[64] = {0};
+
+  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
+  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
+  build_ha_command_topic(command_topic, sizeof(command_topic), client_id, command);
+  build_ha_device_name(device_name, sizeof(device_name), client_id);
+  snprintf(topic, sizeof(topic), "%s/switch/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+
+  snprintf(payload, sizeof(payload),
+      "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
+      "\"availability_topic\":\"%s\",\"command_topic\":\"%s\","
+      "\"value_template\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
+      "\"state_on\":\"ON\",\"state_off\":\"OFF\","
+      "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
+      "\"manufacturer\":\"SuperGreenLab\",\"model\":\"Automation Controller V3\"}}",
+      name,
+      client_id,
+      object_id,
+      state_topic,
+      availability_topic,
+      command_topic,
+      value_template,
+      client_id,
+      device_name);
+  mqtt_publish_message(topic, payload, 1);
+}
+
+static void mqtt_publish_ha_number_config(
+    const char *client_id,
+    const char *object_id,
+    const char *name,
+    const char *command,
+    const char *value_template,
+    int min_value,
+    int max_value,
+    int step,
+    const char *unit) {
+  char topic[160] = {0};
+  char payload[896] = {0};
+  char state_topic[MAX_KVALUE_SIZE] = {0};
+  char availability_topic[MAX_KVALUE_SIZE] = {0};
+  char command_topic[MAX_KVALUE_SIZE] = {0};
+  char device_name[64] = {0};
+  char unit_part[64] = {0};
+
+  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
+  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
+  build_ha_command_topic(command_topic, sizeof(command_topic), client_id, command);
+  build_ha_device_name(device_name, sizeof(device_name), client_id);
+  snprintf(topic, sizeof(topic), "%s/number/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+
+  if (unit && strlen(unit) != 0) {
+    snprintf(unit_part, sizeof(unit_part), ",\"unit_of_measurement\":\"%s\"", unit);
+  }
+
+  snprintf(payload, sizeof(payload),
+      "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
+      "\"availability_topic\":\"%s\",\"command_topic\":\"%s\","
+      "\"value_template\":\"%s\",\"min\":%d,\"max\":%d,\"step\":%d,"
+      "\"mode\":\"box\"%s,"
+      "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
+      "\"manufacturer\":\"SuperGreenLab\",\"model\":\"Automation Controller V3\"}}",
+      name,
+      client_id,
+      object_id,
+      state_topic,
+      availability_topic,
+      command_topic,
+      value_template,
+      min_value,
+      max_value,
+      step,
+      unit_part,
+      client_id,
+      device_name);
+  mqtt_publish_message(topic, payload, 1);
+}
+
+static void mqtt_publish_ha_button_config(
+    const char *client_id,
+    const char *object_id,
+    const char *name,
+    const char *command) {
+  char topic[160] = {0};
+  char payload[640] = {0};
+  char availability_topic[MAX_KVALUE_SIZE] = {0};
+  char command_topic[MAX_KVALUE_SIZE] = {0};
+  char device_name[64] = {0};
+
+  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
+  build_ha_command_topic(command_topic, sizeof(command_topic), client_id, command);
+  build_ha_device_name(device_name, sizeof(device_name), client_id);
+  snprintf(topic, sizeof(topic), "%s/button/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+
+  snprintf(payload, sizeof(payload),
+      "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"availability_topic\":\"%s\","
+      "\"command_topic\":\"%s\",\"payload_press\":\"PRESS\","
+      "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
+      "\"manufacturer\":\"SuperGreenLab\",\"model\":\"Automation Controller V3\"}}",
+      name,
+      client_id,
+      object_id,
+      availability_topic,
+      command_topic,
+      client_id,
+      device_name);
+  mqtt_publish_message(topic, payload, 1);
+}
+
 static void mqtt_publish_ha_discovery(const char *client_id) {
   mqtt_publish_ha_config(client_id, "box_0_temp", "Box 1 Temperature", "{{ value_json.box_0_temp }}", "°C", "temperature");
+  mqtt_discovery_pause();
   mqtt_publish_ha_config(client_id, "box_0_humi", "Box 1 Humidity", "{{ value_json.box_0_humi }}", "%", "humidity");
+  mqtt_discovery_pause();
   mqtt_publish_ha_config(client_id, "box_0_vpd", "Box 1 VPD", "{{ value_json.box_0_vpd }}", "kPa", "");
+  mqtt_discovery_pause();
   mqtt_publish_ha_config(client_id, "box_0_co2", "Box 1 CO2", "{{ value_json.box_0_co2 }}", "ppm", "carbon_dioxide");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_1_temp", "Box 2 Temperature", "{{ value_json.box_1_temp }}", "°C", "temperature");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_1_humi", "Box 2 Humidity", "{{ value_json.box_1_humi }}", "%", "humidity");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_1_vpd", "Box 2 VPD", "{{ value_json.box_1_vpd }}", "kPa", "");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_1_co2", "Box 2 CO2", "{{ value_json.box_1_co2 }}", "ppm", "carbon_dioxide");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_2_temp", "Box 3 Temperature", "{{ value_json.box_2_temp }}", "°C", "temperature");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_2_humi", "Box 3 Humidity", "{{ value_json.box_2_humi }}", "%", "humidity");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_2_vpd", "Box 3 VPD", "{{ value_json.box_2_vpd }}", "kPa", "");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "box_2_co2", "Box 3 CO2", "{{ value_json.box_2_co2 }}", "ppm", "carbon_dioxide");
+  mqtt_discovery_pause();
   mqtt_publish_ha_config(client_id, "sensor_health_status", "Sensor Health Status", "{{ value_json.sensor_health_status }}", "", "");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_config(client_id, "sensor_health_status_text", "Sensor Health Status Text", "{{ value_json.sensor_health_status_text }}", "", "");
+  mqtt_discovery_pause();
   mqtt_publish_ha_config(client_id, "sensor_health_last_alert", "Sensor Health Last Alert", "{{ value_json.sensor_health_last_alert }}", "", "");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_binary_config(client_id, "sensor_health_problem", "Sensor Health Problem", "{{ value_json.sensor_health_problem }}", "problem");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_binary_config(client_id, "box_0_sensor_problem", "Box 1 Sensor Problem", "{{ value_json.box_0_sensor_problem }}", "problem");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_binary_config(client_id, "box_1_sensor_problem", "Box 2 Sensor Problem", "{{ value_json.box_1_sensor_problem }}", "problem");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_binary_config(client_id, "box_2_sensor_problem", "Box 3 Sensor Problem", "{{ value_json.box_2_sensor_problem }}", "problem");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_switch_config(client_id, "sensor_health_enabled", "Sensor Health Enabled", "sensor_health_enabled", "{{ value_json.sensor_health_enabled }}");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_number_config(client_id, "sensor_health_period_s", "Sensor Health Period", "sensor_health_period_s", "{{ value_json.sensor_health_period_s }}", 5, 3600, 1, "s");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_button_config(client_id, "reboot", "Reboot", "reboot");
+  mqtt_discovery_pause();
+  mqtt_publish_ha_button_config(client_id, "ota_start", "Start OTA", "ota_start");
 }
 
 void mqtt_publish_ha_state() {
   char client_id[MAX_KVALUE_SIZE] = {0};
   char topic[MAX_KVALUE_SIZE] = {0};
-  char payload[320] = {0};
+  char payload[1024] = {0};
   char alert[MAX_KVALUE_SIZE] = {0};
+  int sensor_health_status = 0;
+  const char *sensor_health_status_text = NULL;
+  const char *sensor_health_problem = NULL;
+  const char *box_0_sensor_problem = NULL;
+  const char *box_1_sensor_problem = NULL;
+  const char *box_2_sensor_problem = NULL;
 
   if (!connected || client == NULL) {
     return;
@@ -245,16 +487,46 @@ void mqtt_publish_ha_state() {
   }
 
   get_sensor_health_last_alert(alert, sizeof(alert) - 1);
+  sensor_health_status = get_sensor_health_status();
+  sensor_health_status_text = sensor_health_status_to_text(sensor_health_status);
+  sensor_health_problem = sensor_health_problem_to_text(sensor_health_status);
+  box_0_sensor_problem = box_sensor_problem_to_text(alert, 0);
+  box_1_sensor_problem = box_sensor_problem_to_text(alert, 1);
+  box_2_sensor_problem = box_sensor_problem_to_text(alert, 2);
   build_ha_state_topic(topic, sizeof(topic), client_id);
   snprintf(payload, sizeof(payload),
       "{\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
-      "\"box_0_co2\":%ld,\"sensor_health_status\":%d,"
+      "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
+      "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
+      "\"box_2_humi\":%d,\"box_2_vpd\":%.2f,\"box_2_co2\":%ld,"
+      "\"sensor_health_status\":%d,\"sensor_health_status_text\":\"%s\","
+      "\"sensor_health_problem\":\"%s\","
+      "\"box_0_sensor_problem\":\"%s\","
+      "\"box_1_sensor_problem\":\"%s\","
+      "\"box_2_sensor_problem\":\"%s\","
+      "\"sensor_health_enabled\":\"%s\","
+      "\"sensor_health_period_s\":%u,"
       "\"sensor_health_last_alert\":\"%s\"}",
       get_box_0_temp(),
       get_box_0_humi(),
       (float)get_box_0_vpd() / 100.0f,
       (long)get_box_0_co2(),
-      get_sensor_health_status(),
+      get_box_1_temp(),
+      get_box_1_humi(),
+      (float)get_box_1_vpd() / 100.0f,
+      (long)get_box_1_co2(),
+      get_box_2_temp(),
+      get_box_2_humi(),
+      (float)get_box_2_vpd() / 100.0f,
+      (long)get_box_2_co2(),
+      sensor_health_status,
+      sensor_health_status_text,
+      sensor_health_problem,
+      box_0_sensor_problem,
+      box_1_sensor_problem,
+      box_2_sensor_problem,
+      get_sensor_health_enabled() ? "ON" : "OFF",
+      (unsigned int)get_sensor_health_period_s(),
       alert);
   mqtt_publish_message(topic, payload, 1);
 }
@@ -277,11 +549,74 @@ void mqtt_publish_ha_state() {
 static void subscribe_cmd() {
   char cmd_channel[MAX_KVALUE_SIZE] = {0};
   char client_id[MAX_KVALUE_SIZE] = {0};
+  char topic[MAX_KVALUE_SIZE] = {0};
   get_broker_clientid(client_id, sizeof(client_id) - 1);
   sprintf(cmd_channel, "%s.cmd", client_id);
 
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT subscribe_cmd %s", cmd_channel);
   esp_mqtt_client_subscribe(client, cmd_channel, 2);
+  build_ha_command_topic(topic, sizeof(topic), client_id, "reboot");
+  esp_mqtt_client_subscribe(client, topic, 1);
+  build_ha_command_topic(topic, sizeof(topic), client_id, "ota_start");
+  esp_mqtt_client_subscribe(client, topic, 1);
+  build_ha_command_topic(topic, sizeof(topic), client_id, "sensor_health_enabled");
+  esp_mqtt_client_subscribe(client, topic, 1);
+  build_ha_command_topic(topic, sizeof(topic), client_id, "sensor_health_period_s");
+  esp_mqtt_client_subscribe(client, topic, 1);
+}
+
+static void parse_ha_command(esp_mqtt_event_handle_t event) {
+  char topic[MAX_KVALUE_SIZE] = {0};
+  char payload[64] = {0};
+  char client_id[MAX_KVALUE_SIZE] = {0};
+  char expected[MAX_KVALUE_SIZE] = {0};
+
+  if (event->topic_len <= 0 || event->topic_len >= MAX_KVALUE_SIZE || event->data_len >= (int)sizeof(payload)) {
+    return;
+  }
+
+  memcpy(topic, event->topic, event->topic_len);
+  topic[event->topic_len] = 0;
+  memcpy(payload, event->data, event->data_len);
+  payload[event->data_len] = 0;
+
+  get_broker_clientid(client_id, sizeof(client_id) - 1);
+
+  build_ha_command_topic(expected, sizeof(expected), client_id, "reboot");
+  if (strcmp(topic, expected) == 0) {
+    if (strcmp(payload, "PRESS") == 0) {
+      set_reboot(1);
+    }
+    return;
+  }
+
+  build_ha_command_topic(expected, sizeof(expected), client_id, "ota_start");
+  if (strcmp(topic, expected) == 0) {
+    if (strcmp(payload, "PRESS") == 0) {
+      set_ota_start(1);
+    }
+    return;
+  }
+
+  build_ha_command_topic(expected, sizeof(expected), client_id, "sensor_health_enabled");
+  if (strcmp(topic, expected) == 0) {
+    if (strcmp(payload, "ON") == 0 || strcmp(payload, "1") == 0 || strcmp(payload, "true") == 0) {
+      set_sensor_health_enabled(1);
+    } else if (strcmp(payload, "OFF") == 0 || strcmp(payload, "0") == 0 || strcmp(payload, "false") == 0) {
+      set_sensor_health_enabled(0);
+    }
+    mqtt_publish_ha_state();
+    return;
+  }
+
+  build_ha_command_topic(expected, sizeof(expected), client_id, "sensor_health_period_s");
+  if (strcmp(topic, expected) == 0) {
+    int period = atoi(payload);
+    if (period >= 5 && period <= 3600) {
+      set_sensor_health_period_s((uint16_t)period);
+      mqtt_publish_ha_state();
+    }
+  }
 }
 
 static void parse_cmd(esp_mqtt_event_handle_t event) {
@@ -375,6 +710,8 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
       break;
     case MQTT_EVENT_DATA:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_DATA");
+
+      parse_ha_command(event);
 
       <% if (hasScr) { %>
         if (event->topic_len > 6 && !strncmp(&(event->topic[event->topic_len-6]), "scrrep", 6)) {
@@ -472,12 +809,12 @@ static void mqtt_task(void *param) {
           subscribe_scr();
         <% } %>
 
-        if (first_connect) {
-          first_connect = false;
-          ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-        }
-        mqtt_publish_ha_discovery(client_id);
         mqtt_publish_ha_availability(client_id, "online");
+        if (first_connect) {
+          ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
+          mqtt_publish_ha_discovery(client_id);
+          first_connect = false;
+        }
         mqtt_publish_ha_state();
         last_ha_publish = xTaskGetTickCount();
       } <% if (hasScr) { %> else if (c == CMD_MQTT_CHANGE_SCR_CHANNEL) {
@@ -552,9 +889,6 @@ static int mqtt_logging_vprintf(const char *str, va_list l) {
   int len = vsnprintf((char*)buf_in, MAX_QUEUE_ITEM_SIZE-1, str, l);
   buf_in[len] = 0;
   xQueueSend(log_queue, buf_in, 0);
-  if (cmd/* && uxQueueMessagesWaiting(log_queue) > 5*/) {
-    xQueueSend(cmd, &CMD_MQTT_FORCE_FLUSH, 0);
-  }
   return vprintf(str, l);
 }
 
