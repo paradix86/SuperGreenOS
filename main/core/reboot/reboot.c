@@ -47,12 +47,16 @@ void reset_on_next_reboot() {
 
 void init_reboot() {
   if (hasi32(N_SHORT_REBOOTS)) { // detect old version
-    reset_nvs();
+    ESP_LOGW(SGO_LOG_NOSEND, "@REBOOT Migrating counter type");
+    remove_key(N_SHORT_REBOOTS);
+    seti8(N_SHORT_REBOOTS, 0);
   }
   defaulti8(N_SHORT_REBOOTS, 0);
   int n = geti8(N_SHORT_REBOOTS);
   if (n >= MAX_SHORT_REBOOTS) {
-    reset_nvs();
+    ESP_LOGE(SGO_LOG_NOSEND, "@REBOOT Critical: %d short reboots. Preserving NVS and resetting counter.", n);
+    seti8(N_SHORT_REBOOTS, 0);
+    n = 0;
   }
   ESP_LOGI(SGO_LOG_EVENT, "@REBOOT N_SHORT_REBOOTS=%d", n);
   seti8(N_SHORT_REBOOTS, ++n);
