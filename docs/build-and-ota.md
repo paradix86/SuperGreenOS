@@ -241,15 +241,16 @@ Example recovered live state observed after this incident:
 - `WIFI_STATUS = 3`
 - `WIFI_IP = 192.168.1.104`
 
-## Hardening recommendation
+## NVS safety hardening (implemented in commit `3282b14`)
 
-The current reboot guard is operationally risky on a field device because 5 short reboots erase the full NVS store.
+The reboot guard previously erased the full NVS store after 5 short reboots, wiping Wi-Fi credentials and all user config.
 
-A safer future change would be:
+This was changed in `main/core/reboot/reboot.c`:
 
-- preserve Wi-Fi credentials and user parameters
-- clear only the minimum transient state needed for recovery
-- or move factory-reset behavior behind an explicit opt-in instead of an automatic short-reboot threshold
+- on `N_SHORT_REBOOTS >= MAX_SHORT_REBOOTS`: counter is reset to 0 and boot continues — NVS is preserved
+- on i32→i8 counter type migration: only the `N_SHORT_REBOOTS` NVS key is erased and reinitialized — all other NVS keys preserved
+
+The full `reset_nvs()` (flash erase + restart) is no longer reachable from the reboot guard.
 
 ---
 

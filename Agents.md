@@ -511,10 +511,11 @@ Recovered live state verified after this incident:
 - `WIFI_STATUS = 3`
 - `WIFI_IP = 192.168.1.104`
 
-Recommended future hardening:
+NVS safety hardening — implemented (commit `3282b14`):
 
-- do not erase the whole NVS store after only 5 short reboots on a field controller
-- preserve at least Wi-Fi credentials and user configuration during automatic recovery
+- `N_SHORT_REBOOTS >= MAX_SHORT_REBOOTS`: counter reset to 0, boot continues, NVS preserved
+- i32→i8 counter type migration: only the `N_SHORT_REBOOTS` key erased, all other NVS keys preserved
+- the full `reset_nvs()` call (flash erase + restart) is no longer reachable from the reboot guard
 
 ---
 
