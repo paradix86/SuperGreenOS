@@ -59,6 +59,14 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 
 #define MAX_LOG_QUEUE_ITEMS 25
 
+typedef enum {
+  MQTT_STATE_DIAG_NONE = 0,
+  MQTT_STATE_DIAG_S4A = 1,
+  MQTT_STATE_DIAG_S4B = 2,
+  MQTT_STATE_DIAG_S4C = 3,
+  MQTT_STATE_DIAG_S4D = 4,
+} mqtt_state_diag_mode_t;
+
 static void build_ha_device_name(char *dest, size_t len, const char *client_id) {
   snprintf(dest, len, "SuperGreen %s", client_id);
 }
@@ -439,6 +447,119 @@ void mqtt_publish_ha_state() {
   mqtt_publish_message(topic, payload, 1);
 }
 
+static mqtt_state_diag_mode_t mqtt_state_diag_mode_from_client_id(const char *client_id) {
+  if (client_id == NULL) {
+    return MQTT_STATE_DIAG_NONE;
+  }
+  size_t n = strlen(client_id);
+  if (n < 4) {
+    return MQTT_STATE_DIAG_NONE;
+  }
+  const char *suffix = client_id + n - 4;
+  if (strcmp(suffix, "-s4a") == 0) {
+    return MQTT_STATE_DIAG_S4A;
+  }
+  if (strcmp(suffix, "-s4b") == 0) {
+    return MQTT_STATE_DIAG_S4B;
+  }
+  if (strcmp(suffix, "-s4c") == 0) {
+    return MQTT_STATE_DIAG_S4C;
+  }
+  if (strcmp(suffix, "-s4d") == 0) {
+    return MQTT_STATE_DIAG_S4D;
+  }
+  return MQTT_STATE_DIAG_NONE;
+}
+
+static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *client_id) {
+  char topic[MAX_KVALUE_SIZE] = {0};
+  char payload[1400] = {0};
+  char alert[MAX_KVALUE_SIZE] = {0};
+  int sensor_health_status = 0;
+  const char *sensor_health_status_text = NULL;
+  const char *sensor_health_problem = NULL;
+  const char *box_0_sensor_problem = NULL;
+  const char *box_1_sensor_problem = NULL;
+  const char *box_2_sensor_problem = NULL;
+
+  if (!connected || client == NULL || client_id == NULL || strlen(client_id) == 0) {
+    return;
+  }
+
+  build_ha_state_topic(topic, sizeof(topic), client_id);
+  if (mode == MQTT_STATE_DIAG_S4A) {
+    snprintf(payload, sizeof(payload), "{\"state\":%d}", get_state());
+  } else if (mode == MQTT_STATE_DIAG_S4B) {
+    snprintf(payload, sizeof(payload),
+        "{\"state\":%d,\"box_0_temp\":%d}",
+        get_state(),
+        get_box_0_temp());
+  } else if (mode == MQTT_STATE_DIAG_S4C) {
+    snprintf(payload, sizeof(payload),
+        "{\"state\":%d,\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
+        "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
+        "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
+        "\"box_2_humi\":%d,\"box_2_vpd\":%.2f,\"box_2_co2\":%ld}",
+        get_state(),
+        get_box_0_temp(),
+        get_box_0_humi(),
+        (float)get_box_0_vpd() / 100.0f,
+        (long)get_box_0_co2(),
+        get_box_1_temp(),
+        get_box_1_humi(),
+        (float)get_box_1_vpd() / 100.0f,
+        (long)get_box_1_co2(),
+        get_box_2_temp(),
+        get_box_2_humi(),
+        (float)get_box_2_vpd() / 100.0f,
+        (long)get_box_2_co2());
+  } else {
+    get_sensor_health_last_alert(alert, sizeof(alert) - 1);
+    sensor_health_status = get_sensor_health_status();
+    sensor_health_status_text = sensor_health_status_to_text(sensor_health_status);
+    sensor_health_problem = sensor_health_problem_to_text(sensor_health_status);
+    box_0_sensor_problem = box_sensor_problem_to_text(alert, 0);
+    box_1_sensor_problem = box_sensor_problem_to_text(alert, 1);
+    box_2_sensor_problem = box_sensor_problem_to_text(alert, 2);
+    snprintf(payload, sizeof(payload),
+        "{\"state\":%d,\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
+        "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
+        "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
+        "\"box_2_humi\":%d,\"box_2_vpd\":%.2f,\"box_2_co2\":%ld,"
+        "\"sensor_health_status\":%d,\"sensor_health_status_text\":\"%s\","
+        "\"sensor_health_problem\":\"%s\","
+        "\"box_0_sensor_problem\":\"%s\","
+        "\"box_1_sensor_problem\":\"%s\","
+        "\"box_2_sensor_problem\":\"%s\","
+        "\"sensor_health_enabled\":\"%s\","
+        "\"sensor_health_period_s\":%u,"
+        "\"sensor_health_last_alert\":\"%s\"}",
+        get_state(),
+        get_box_0_temp(),
+        get_box_0_humi(),
+        (float)get_box_0_vpd() / 100.0f,
+        (long)get_box_0_co2(),
+        get_box_1_temp(),
+        get_box_1_humi(),
+        (float)get_box_1_vpd() / 100.0f,
+        (long)get_box_1_co2(),
+        get_box_2_temp(),
+        get_box_2_humi(),
+        (float)get_box_2_vpd() / 100.0f,
+        (long)get_box_2_co2(),
+        sensor_health_status,
+        sensor_health_status_text,
+        sensor_health_problem,
+        box_0_sensor_problem,
+        box_1_sensor_problem,
+        box_2_sensor_problem,
+        get_sensor_health_enabled() ? "ON" : "OFF",
+        (unsigned int)get_sensor_health_period_s(),
+        alert);
+  }
+  mqtt_publish_message(topic, payload, 1);
+}
+
 
 
 
@@ -639,6 +760,10 @@ static void mqtt_task(void *param) {
     client_id[0] = 0;
   }
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log clientid: %s", client_id);
+  mqtt_state_diag_mode_t state_diag_mode = mqtt_state_diag_mode_from_client_id(client_id);
+  ESP_LOGI(SGO_LOG_NOSEND, "@MQTT State diag mode=%d", (int)state_diag_mode);
+
+  
 
   char broker_url[MAX_KVALUE_SIZE] = {0};
   char ha_availability_topic[MAX_KVALUE_SIZE] = {0};
@@ -673,29 +798,35 @@ static void mqtt_task(void *param) {
         
 
         mqtt_publish_ha_availability(client_id, "online");
-        if (first_connect) {
+        if (state_diag_mode == MQTT_STATE_DIAG_NONE && first_connect) {
           ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
           mqtt_publish_ha_discovery(client_id);
           first_connect = false;
         }
-        mqtt_publish_ha_state();
-        last_ha_publish = xTaskGetTickCount();
-        mqtt_publish_diag(client_id);
-        last_diag_publish = xTaskGetTickCount();
-      }
+        if (state_diag_mode == MQTT_STATE_DIAG_NONE) {
+          mqtt_publish_ha_state();
+          last_ha_publish = xTaskGetTickCount();
+          mqtt_publish_diag(client_id);
+          last_diag_publish = xTaskGetTickCount();
+        } else {
+          mqtt_publish_ha_state_diag(state_diag_mode, client_id);
+        }
+      } 
     }
     if (connected) {
-      if ((xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
+      if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
+          (xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
         mqtt_publish_ha_state();
         last_ha_publish = xTaskGetTickCount();
       }
 
-      if ((xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
+      if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
+          (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
         mqtt_publish_diag(client_id);
         last_diag_publish = xTaskGetTickCount();
       }
 
-
+      
     }
   }
 }
