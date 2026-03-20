@@ -621,22 +621,6 @@ static void mqtt_publish_diag(const char *client_id) {
   mqtt_publish_message(topic, payload, 0);
 }
 
-static int mqtt_connect_phase_from_client_id(const char *client_id) {
-  int phase = 6;
-  if (client_id == NULL) {
-    return phase;
-  }
-  size_t n = strlen(client_id);
-  if (n >= 3 &&
-      client_id[n - 3] == '-' &&
-      client_id[n - 2] == 'p' &&
-      client_id[n - 1] >= '1' &&
-      client_id[n - 1] <= '6') {
-    phase = client_id[n - 1] - '0';
-  }
-  return phase;
-}
-
 static void mqtt_task(void *param) {
   int c;
   bool first_connect = true;
@@ -655,10 +639,6 @@ static void mqtt_task(void *param) {
     client_id[0] = 0;
   }
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log clientid: %s", client_id);
-  int connect_phase = mqtt_connect_phase_from_client_id(client_id);
-  ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Connect phase=%d", connect_phase);
-
-  
 
   char broker_url[MAX_KVALUE_SIZE] = {0};
   char ha_availability_topic[MAX_KVALUE_SIZE] = {0};
@@ -686,48 +666,36 @@ static void mqtt_task(void *param) {
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {
 
-        if (connect_phase >= 2) {
-          
-            subscribe_cmd();
-          
+        
+          subscribe_cmd();
+        
 
-          
-        }
+        
 
-        if (connect_phase >= 3) {
-          mqtt_publish_ha_availability(client_id, "online");
-        }
-
-        if (connect_phase >= 5 && first_connect) {
+        mqtt_publish_ha_availability(client_id, "online");
+        if (first_connect) {
           ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
           mqtt_publish_ha_discovery(client_id);
           first_connect = false;
-        } else if (connect_phase < 5 && first_connect) {
-          first_connect = false;
         }
-
-        if (connect_phase >= 4) {
-          mqtt_publish_ha_state();
-          last_ha_publish = xTaskGetTickCount();
-        }
-        if (connect_phase >= 6) {
-          mqtt_publish_diag(client_id);
-          last_diag_publish = xTaskGetTickCount();
-        }
-      } 
+        mqtt_publish_ha_state();
+        last_ha_publish = xTaskGetTickCount();
+        mqtt_publish_diag(client_id);
+        last_diag_publish = xTaskGetTickCount();
+      }
     }
     if (connected) {
-      if (connect_phase >= 4 && (xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
+      if ((xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
         mqtt_publish_ha_state();
         last_ha_publish = xTaskGetTickCount();
       }
 
-      if (connect_phase >= 6 && (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
+      if ((xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
         mqtt_publish_diag(client_id);
         last_diag_publish = xTaskGetTickCount();
       }
 
-      
+
     }
   }
 }
