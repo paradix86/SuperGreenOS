@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "sodium/utils.h"
 #include "mbedtls/sha256.h"
+#include "esp_system.h"
 
 #include "../log/log.h"
 #include "../kv/kv.h"
@@ -147,9 +148,9 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 #define HA_DISCOVERY_PREFIX "homeassistant"
 #define HA_STATE_PUBLISH_PERIOD_MS (30 * 1000)
 #define HA_DISCOVERY_PUBLISH_DELAY_MS 75
+#define DIAG_PUBLISH_PERIOD_MS (5 * 60 * 1000)
 
 #define MAX_LOG_QUEUE_ITEMS 25
-static uint8_t buf_out[MAX_QUEUE_ITEM_SIZE] = {0};
 
 static void build_ha_device_name(char *dest, size_t len, const char *client_id) {
   snprintf(dest, len, "SuperGreen %s", client_id);
@@ -733,10 +734,27 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
   return ESP_OK;
 }
 
+static void mqtt_publish_diag(const char *client_id) {
+  char topic[MAX_KVALUE_SIZE] = {0};
+  char payload[192] = {0};
+  snprintf(topic, sizeof(topic), "supergreen/%s/diag", client_id);
+  snprintf(payload, sizeof(payload),
+      "{\"n_restarts\":%d,\"ota_ts\":%ld,\"heap_free\":%lu,"
+      "\"uptime_s\":%lu,\"state\":%d,\"box_0_enabled\":%d}",
+      (int)get_n_restarts(),
+      (long)get_ota_timestamp(),
+      (unsigned long)esp_get_free_heap_size(),
+      (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000),
+      (int)get_state(),
+      (int)get_box_0_enabled());
+  mqtt_publish_message(topic, payload, 0);
+}
+
 static void mqtt_task(void *param) {
   int c;
   bool first_connect = true;
   TickType_t last_ha_publish = 0;
+  TickType_t last_diag_publish = 0;
 
   uint64_t _chipmacid;
   esp_efuse_mac_get_default((uint8_t*) (&_chipmacid));
@@ -750,14 +768,6 @@ static void mqtt_task(void *param) {
     client_id[0] = 0;
   }
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log clientid: %s", client_id);
-
-  char log_channel[MAX_KVALUE_SIZE] = {0};
-  get_broker_channel(log_channel, sizeof(log_channel) - 1);
-  if (strlen(log_channel) == 0) {
-    snprintf(log_channel, sizeof(log_channel)-1, "%s.log", client_id);
-    set_broker_channel(log_channel);
-  }
-  ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log channel: %s", log_channel);
 
   <% if (hasScr) { %>
     char scr_channel[MAX_KVALUE_SIZE] = {0};
@@ -817,6 +827,8 @@ static void mqtt_task(void *param) {
         }
         mqtt_publish_ha_state();
         last_ha_publish = xTaskGetTickCount();
+        mqtt_publish_diag(client_id);
+        last_diag_publish = xTaskGetTickCount();
       } <% if (hasScr) { %> else if (c == CMD_MQTT_CHANGE_SCR_CHANNEL) {
         get_broker_scrtoken(scr_token, sizeof(scr_token)-1);
         if (strlen(scr_token) != 0) {
@@ -830,15 +842,14 @@ static void mqtt_task(void *param) {
       } <% } %>
     }
     if (connected) {
-      memset(buf_out, 0, MAX_QUEUE_ITEM_SIZE);
-      while (xQueueReceive(log_queue, buf_out, 0)) {
-        esp_mqtt_client_publish(client, log_channel, (char *)buf_out, 0, 0, 0);
-        memset(buf_out, 0, MAX_QUEUE_ITEM_SIZE);
-      }
-
       if ((xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
         mqtt_publish_ha_state();
         last_ha_publish = xTaskGetTickCount();
+      }
+
+      if ((xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
+        mqtt_publish_diag(client_id);
+        last_diag_publish = xTaskGetTickCount();
       }
 
       <% if (hasScr) { %>
@@ -860,35 +871,6 @@ static void mqtt_task(void *param) {
 }
 
 static int mqtt_logging_vprintf(const char *str, va_list l) {
-  if (strlen(str) <= 9+7 ||
-      (strncmp("I (%d) %s", &(str[7]), 9) != 0 &&
-       strncmp("W (%d) %s", &(str[7]), 9) != 0 &&
-       strncmp("E (%d) %s", &(str[7]), 9) != 0)) {
-    return vprintf(str, l); 
-  }
-  int totalsize = vsnprintf(NULL, 0, str, l);
-  if (totalsize >= MAX_QUEUE_ITEM_SIZE - 1) {
-    return vprintf(str, l);
-  }
-  
-  va_list nl;
-  va_copy(nl, l);
-  va_arg(nl, int);
-  const char *tag = va_arg(nl, const char *);
-  if (strcmp(tag, SGO_LOG_MSG) != 0 &&
-      strcmp(tag, SGO_LOG_EVENT) != 0 &&
-      strcmp(tag, SGO_LOG_METRIC) != 0) {
-    return vprintf(str, l);
-  }
-
-  uint8_t buf_in[MAX_QUEUE_ITEM_SIZE] = {0};
-  if (uxQueueMessagesWaiting(log_queue) >= MAX_LOG_QUEUE_ITEMS) {
-    xQueueReceive(log_queue, buf_in, 0);
-  }
-  memset(buf_in, 0, MAX_QUEUE_ITEM_SIZE);
-  int len = vsnprintf((char*)buf_in, MAX_QUEUE_ITEM_SIZE-1, str, l);
-  buf_in[len] = 0;
-  xQueueSend(log_queue, buf_in, 0);
   return vprintf(str, l);
 }
 
