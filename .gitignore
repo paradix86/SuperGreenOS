@@ -25,3 +25,4 @@ main/Kconfig.projbuild
 
 build.env
 postman
+auto-cpufreq/

@@ -15,6 +15,7 @@ It is intentionally plain Markdown so it works well:
 - [UI Customization](./ui-customization.md)
 - [Backend Roadmap](./backend-roadmap.md)
 - [Config Recovery](./config-recovery.md)
+- [Live Experiment Emergency Recovery](./live-experiment-emergency-recovery.md)
 
 Current notable validated topics:
 
@@ -27,6 +28,7 @@ Current notable validated topics:
 - first deployed backend module: `sensor_health`
 - relationship between this repo and `SuperGreenOSBoilerplate`
 - config recovery after NVS erase — exported JSON as recovery source, LED/timer chain, motor brownout investigation
+- canonical emergency abort path for unstable live experiments (`BOX_0` kept active, unreachable broker stabilization)
 
 ## Suggested rule
 

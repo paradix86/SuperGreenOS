@@ -259,6 +259,34 @@ Parses raw integer response (not `v=...`).
 
 ---
 
+## Mandatory abort path for unstable live experiments
+
+For unstable live test runs (reboot loop, broker-switch failure, uncertain runtime state), the canonical emergency abort path is now fixed and must be applied first:
+
+1. `POST /i?k=BOX_0_ENABLED&v=1` (retry loop)
+2. `POST /s?k=BROKER_URL&v=mqtt%3A%2F%2F192.168.1.1%3A9999` (retry loop)
+3. `POST /s?k=BROKER_CLIENTID&v=304a4fd6eb4c` (retry loop)
+4. `POST /i?k=REBOOT&v=1` (retry loop)
+5. verify repeatedly:
+   - `BROKER_URL = mqtt://192.168.1.1:9999`
+   - `BROKER_CLIENTID = 304a4fd6eb4c`
+   - `STATE = 2`
+   - `WIFI_STATUS = 3`
+   - `BOX_0_ENABLED = 1`
+   - `N_RESTARTS` stable
+   - `LED_0_DUTY` and `BOX_0_BLOWER_DUTY` are logged/reported (not hard-fail gates)
+
+Reusable canonical script:
+
+```bash
+cd /home/alan/sources/SuperGreenOS
+bash ./scripts/emergency_recover_controller.sh 192.168.1.104
+```
+
+Important: on unstable diagnostic firmware, do **not** use `sink2` as the immediate emergency target. Use the unreachable broker target first to stabilize, then decide the next runtime target separately.
+
+---
+
 ## Firmware Reference
 
 Key files for understanding the output chain:
