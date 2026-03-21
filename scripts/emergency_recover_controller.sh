@@ -160,10 +160,29 @@ main() {
     attempt=$((attempt + 1))
     log "=== RECOVERY ATTEMPT ${attempt} ==="
 
-    set_i_verify "BOX_0_ENABLED" "$TARGET_BOX0_ENABLED"
-    set_s_verify "BROKER_URL" "$TARGET_BROKER_URL_ENC" "$TARGET_BROKER_URL"
-    set_s_verify "BROKER_CLIENTID" "$TARGET_BROKER_CLIENTID" "$TARGET_BROKER_CLIENTID"
-    reboot_retry
+    if ! set_i_verify "BOX_0_ENABLED" "$TARGET_BOX0_ENABLED"; then
+      log "BOX_0_ENABLED write/verify failed; retrying full recovery sequence."
+      sleep 2
+      continue
+    fi
+
+    if ! set_s_verify "BROKER_URL" "$TARGET_BROKER_URL_ENC" "$TARGET_BROKER_URL"; then
+      log "BROKER_URL write/verify failed; retrying full recovery sequence."
+      sleep 2
+      continue
+    fi
+
+    if ! set_s_verify "BROKER_CLIENTID" "$TARGET_BROKER_CLIENTID" "$TARGET_BROKER_CLIENTID"; then
+      log "BROKER_CLIENTID write/verify failed; retrying full recovery sequence."
+      sleep 2
+      continue
+    fi
+
+    if ! reboot_retry; then
+      log "REBOOT write failed; retrying full recovery sequence."
+      sleep 2
+      continue
+    fi
 
     # Give the controller time to reboot and reconnect.
     sleep 25
