@@ -58,6 +58,8 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 #define DIAG_PUBLISH_PERIOD_MS (5 * 60 * 1000)
 
 #define MAX_LOG_QUEUE_ITEMS 25
+#define MQTT_DIAG_KEY_STAGE "MQTT_STG"
+#define MQTT_DIAG_KEY_DISC_IDX "MQTT_DIDX"
 
 typedef enum {
   MQTT_STATE_DIAG_NONE = 0,
@@ -66,6 +68,42 @@ typedef enum {
   MQTT_STATE_DIAG_S4C = 3,
   MQTT_STATE_DIAG_S4D = 4,
 } mqtt_state_diag_mode_t;
+
+typedef enum {
+  MQTT_DIAG_STAGE_IDLE = 0,
+  MQTT_DIAG_STAGE_CONNECTED = 1,
+  MQTT_DIAG_STAGE_SUBSCRIBED = 2,
+  MQTT_DIAG_STAGE_AVAILABILITY = 3,
+  MQTT_DIAG_STAGE_DISCOVERY_START = 4,
+  MQTT_DIAG_STAGE_DISCOVERY_DONE = 5,
+  MQTT_DIAG_STAGE_STATE_ON_CONNECT = 6,
+  MQTT_DIAG_STAGE_DISCONNECTED = 7,
+  MQTT_DIAG_STAGE_DISCOVERY_FAIL = 8,
+} mqtt_diag_stage_t;
+
+static bool mqtt_diag_stage_initialized = false;
+static bool mqtt_diag_disc_idx_initialized = false;
+static int32_t mqtt_diag_last_stage = 0;
+static int32_t mqtt_diag_last_disc_idx = 0;
+
+static void mqtt_diag_set_stage(mqtt_diag_stage_t stage) {
+  int32_t value = (int32_t)stage;
+  if (mqtt_diag_stage_initialized && mqtt_diag_last_stage == value) {
+    return;
+  }
+  seti32(MQTT_DIAG_KEY_STAGE, value);
+  mqtt_diag_last_stage = value;
+  mqtt_diag_stage_initialized = true;
+}
+
+static void mqtt_diag_set_discovery_idx(int32_t idx) {
+  if (mqtt_diag_disc_idx_initialized && mqtt_diag_last_disc_idx == idx) {
+    return;
+  }
+  seti32(MQTT_DIAG_KEY_DISC_IDX, idx);
+  mqtt_diag_last_disc_idx = idx;
+  mqtt_diag_disc_idx_initialized = true;
+}
 
 static void build_ha_device_name(char *dest, size_t len, const char *client_id) {
   snprintf(dest, len, "SuperGreen %s", client_id);
@@ -83,11 +121,11 @@ static void build_ha_command_topic(char *dest, size_t len, const char *client_id
   snprintf(dest, len, "%s/%s/command/%s", HA_TOPIC_PREFIX, client_id, command);
 }
 
-static void mqtt_publish_message(const char *topic, const char *payload, int retain) {
+static int mqtt_publish_message(const char *topic, const char *payload, int retain) {
   if (!connected || client == NULL || strlen(topic) == 0) {
-    return;
+    return -1;
   }
-  esp_mqtt_client_publish(client, topic, payload, 0, 0, retain);
+  return esp_mqtt_client_publish(client, topic, payload, 0, 0, retain);
 }
 
 static void mqtt_discovery_pause() {
@@ -128,7 +166,7 @@ static const char *box_sensor_problem_to_text(const char *alert, int box) {
   return "OFF";
 }
 
-static void mqtt_publish_ha_config(
+static int mqtt_publish_ha_config(
     const char *client_id,
     const char *object_id,
     const char *name,
@@ -170,10 +208,10 @@ static void mqtt_publish_ha_config(
       class_part,
       client_id,
       device_name);
-  mqtt_publish_message(topic, payload, 1);
+  return mqtt_publish_message(topic, payload, 1);
 }
 
-static void mqtt_publish_ha_binary_config(
+static int mqtt_publish_ha_binary_config(
     const char *client_id,
     const char *object_id,
     const char *name,
@@ -210,10 +248,10 @@ static void mqtt_publish_ha_binary_config(
       class_part,
       client_id,
       device_name);
-  mqtt_publish_message(topic, payload, 1);
+  return mqtt_publish_message(topic, payload, 1);
 }
 
-static void mqtt_publish_ha_switch_config(
+static int mqtt_publish_ha_switch_config(
     const char *client_id,
     const char *object_id,
     const char *name,
@@ -248,10 +286,10 @@ static void mqtt_publish_ha_switch_config(
       value_template,
       client_id,
       device_name);
-  mqtt_publish_message(topic, payload, 1);
+  return mqtt_publish_message(topic, payload, 1);
 }
 
-static void mqtt_publish_ha_number_config(
+static int mqtt_publish_ha_number_config(
     const char *client_id,
     const char *object_id,
     const char *name,
@@ -299,10 +337,10 @@ static void mqtt_publish_ha_number_config(
       unit_part,
       client_id,
       device_name);
-  mqtt_publish_message(topic, payload, 1);
+  return mqtt_publish_message(topic, payload, 1);
 }
 
-static void mqtt_publish_ha_button_config(
+static int mqtt_publish_ha_button_config(
     const char *client_id,
     const char *object_id,
     const char *name,
@@ -330,55 +368,50 @@ static void mqtt_publish_ha_button_config(
       command_topic,
       client_id,
       device_name);
-  mqtt_publish_message(topic, payload, 1);
+  return mqtt_publish_message(topic, payload, 1);
 }
 
-static void mqtt_publish_ha_discovery(const char *client_id) {
-  mqtt_publish_ha_config(client_id, "box_0_temp", "Box 1 Temperature", "{{ value_json.box_0_temp }}", "°C", "temperature");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_0_humi", "Box 1 Humidity", "{{ value_json.box_0_humi }}", "%", "humidity");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_0_vpd", "Box 1 VPD", "{{ value_json.box_0_vpd }}", "kPa", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_0_co2", "Box 1 CO2", "{{ value_json.box_0_co2 }}", "ppm", "carbon_dioxide");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_1_temp", "Box 2 Temperature", "{{ value_json.box_1_temp }}", "°C", "temperature");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_1_humi", "Box 2 Humidity", "{{ value_json.box_1_humi }}", "%", "humidity");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_1_vpd", "Box 2 VPD", "{{ value_json.box_1_vpd }}", "kPa", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_1_co2", "Box 2 CO2", "{{ value_json.box_1_co2 }}", "ppm", "carbon_dioxide");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_2_temp", "Box 3 Temperature", "{{ value_json.box_2_temp }}", "°C", "temperature");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_2_humi", "Box 3 Humidity", "{{ value_json.box_2_humi }}", "%", "humidity");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_2_vpd", "Box 3 VPD", "{{ value_json.box_2_vpd }}", "kPa", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "box_2_co2", "Box 3 CO2", "{{ value_json.box_2_co2 }}", "ppm", "carbon_dioxide");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "sensor_health_status", "Sensor Health Status", "{{ value_json.sensor_health_status }}", "", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "sensor_health_status_text", "Sensor Health Status Text", "{{ value_json.sensor_health_status_text }}", "", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_config(client_id, "sensor_health_last_alert", "Sensor Health Last Alert", "{{ value_json.sensor_health_last_alert }}", "", "");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_binary_config(client_id, "sensor_health_problem", "Sensor Health Problem", "{{ value_json.sensor_health_problem }}", "problem");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_binary_config(client_id, "box_0_sensor_problem", "Box 1 Sensor Problem", "{{ value_json.box_0_sensor_problem }}", "problem");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_binary_config(client_id, "box_1_sensor_problem", "Box 2 Sensor Problem", "{{ value_json.box_1_sensor_problem }}", "problem");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_binary_config(client_id, "box_2_sensor_problem", "Box 3 Sensor Problem", "{{ value_json.box_2_sensor_problem }}", "problem");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_switch_config(client_id, "sensor_health_enabled", "Sensor Health Enabled", "sensor_health_enabled", "{{ value_json.sensor_health_enabled }}");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_number_config(client_id, "sensor_health_period_s", "Sensor Health Period", "sensor_health_period_s", "{{ value_json.sensor_health_period_s }}", 5, 3600, 1, "s");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_button_config(client_id, "reboot", "Reboot", "reboot");
-  mqtt_discovery_pause();
-  mqtt_publish_ha_button_config(client_id, "ota_start", "Start OTA", "ota_start");
+static bool mqtt_discovery_step(int32_t idx, int msg_id, bool do_pause) {
+  mqtt_diag_set_discovery_idx(idx);
+  if (!connected || client == NULL || msg_id < 0) {
+    return false;
+  }
+  if (do_pause) {
+    mqtt_discovery_pause();
+  }
+  return true;
+}
+
+static bool mqtt_publish_ha_discovery(const char *client_id) {
+  mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_START);
+  mqtt_diag_set_discovery_idx(0);
+
+  if (!mqtt_discovery_step(1, mqtt_publish_ha_config(client_id, "box_0_temp", "Box 1 Temperature", "{{ value_json.box_0_temp }}", "°C", "temperature"), true)) return false;
+  if (!mqtt_discovery_step(2, mqtt_publish_ha_config(client_id, "box_0_humi", "Box 1 Humidity", "{{ value_json.box_0_humi }}", "%", "humidity"), true)) return false;
+  if (!mqtt_discovery_step(3, mqtt_publish_ha_config(client_id, "box_0_vpd", "Box 1 VPD", "{{ value_json.box_0_vpd }}", "kPa", ""), true)) return false;
+  if (!mqtt_discovery_step(4, mqtt_publish_ha_config(client_id, "box_0_co2", "Box 1 CO2", "{{ value_json.box_0_co2 }}", "ppm", "carbon_dioxide"), true)) return false;
+  if (!mqtt_discovery_step(5, mqtt_publish_ha_config(client_id, "box_1_temp", "Box 2 Temperature", "{{ value_json.box_1_temp }}", "°C", "temperature"), true)) return false;
+  if (!mqtt_discovery_step(6, mqtt_publish_ha_config(client_id, "box_1_humi", "Box 2 Humidity", "{{ value_json.box_1_humi }}", "%", "humidity"), true)) return false;
+  if (!mqtt_discovery_step(7, mqtt_publish_ha_config(client_id, "box_1_vpd", "Box 2 VPD", "{{ value_json.box_1_vpd }}", "kPa", ""), true)) return false;
+  if (!mqtt_discovery_step(8, mqtt_publish_ha_config(client_id, "box_1_co2", "Box 2 CO2", "{{ value_json.box_1_co2 }}", "ppm", "carbon_dioxide"), true)) return false;
+  if (!mqtt_discovery_step(9, mqtt_publish_ha_config(client_id, "box_2_temp", "Box 3 Temperature", "{{ value_json.box_2_temp }}", "°C", "temperature"), true)) return false;
+  if (!mqtt_discovery_step(10, mqtt_publish_ha_config(client_id, "box_2_humi", "Box 3 Humidity", "{{ value_json.box_2_humi }}", "%", "humidity"), true)) return false;
+  if (!mqtt_discovery_step(11, mqtt_publish_ha_config(client_id, "box_2_vpd", "Box 3 VPD", "{{ value_json.box_2_vpd }}", "kPa", ""), true)) return false;
+  if (!mqtt_discovery_step(12, mqtt_publish_ha_config(client_id, "box_2_co2", "Box 3 CO2", "{{ value_json.box_2_co2 }}", "ppm", "carbon_dioxide"), true)) return false;
+  if (!mqtt_discovery_step(13, mqtt_publish_ha_config(client_id, "sensor_health_status", "Sensor Health Status", "{{ value_json.sensor_health_status }}", "", ""), true)) return false;
+  if (!mqtt_discovery_step(14, mqtt_publish_ha_config(client_id, "sensor_health_status_text", "Sensor Health Status Text", "{{ value_json.sensor_health_status_text }}", "", ""), true)) return false;
+  if (!mqtt_discovery_step(15, mqtt_publish_ha_config(client_id, "sensor_health_last_alert", "Sensor Health Last Alert", "{{ value_json.sensor_health_last_alert }}", "", ""), true)) return false;
+  if (!mqtt_discovery_step(16, mqtt_publish_ha_binary_config(client_id, "sensor_health_problem", "Sensor Health Problem", "{{ value_json.sensor_health_problem }}", "problem"), true)) return false;
+  if (!mqtt_discovery_step(17, mqtt_publish_ha_binary_config(client_id, "box_0_sensor_problem", "Box 1 Sensor Problem", "{{ value_json.box_0_sensor_problem }}", "problem"), true)) return false;
+  if (!mqtt_discovery_step(18, mqtt_publish_ha_binary_config(client_id, "box_1_sensor_problem", "Box 2 Sensor Problem", "{{ value_json.box_1_sensor_problem }}", "problem"), true)) return false;
+  if (!mqtt_discovery_step(19, mqtt_publish_ha_binary_config(client_id, "box_2_sensor_problem", "Box 3 Sensor Problem", "{{ value_json.box_2_sensor_problem }}", "problem"), true)) return false;
+  if (!mqtt_discovery_step(20, mqtt_publish_ha_switch_config(client_id, "sensor_health_enabled", "Sensor Health Enabled", "sensor_health_enabled", "{{ value_json.sensor_health_enabled }}"), true)) return false;
+  if (!mqtt_discovery_step(21, mqtt_publish_ha_number_config(client_id, "sensor_health_period_s", "Sensor Health Period", "sensor_health_period_s", "{{ value_json.sensor_health_period_s }}", 5, 3600, 1, "s"), true)) return false;
+  if (!mqtt_discovery_step(22, mqtt_publish_ha_button_config(client_id, "reboot", "Reboot", "reboot"), true)) return false;
+  if (!mqtt_discovery_step(23, mqtt_publish_ha_button_config(client_id, "ota_start", "Start OTA", "ota_start"), false)) return false;
+
+  mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_DONE);
+  return true;
 }
 
 void mqtt_publish_ha_state() {
@@ -745,6 +778,7 @@ static void mqtt_publish_diag(const char *client_id) {
 static void mqtt_task(void *param) {
   int c;
   bool first_connect = true;
+  bool was_connected = false;
   TickType_t last_ha_publish = 0;
   TickType_t last_diag_publish = 0;
 
@@ -762,6 +796,8 @@ static void mqtt_task(void *param) {
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log clientid: %s", client_id);
   mqtt_state_diag_mode_t state_diag_mode = mqtt_state_diag_mode_from_client_id(client_id);
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT State diag mode=%d", (int)state_diag_mode);
+  mqtt_diag_set_stage(MQTT_DIAG_STAGE_IDLE);
+  mqtt_diag_set_discovery_idx(-1);
 
   
 
@@ -790,6 +826,7 @@ static void mqtt_task(void *param) {
   while(true) {
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {
+        mqtt_diag_set_stage(MQTT_DIAG_STAGE_CONNECTED);
 
         
           subscribe_cmd();
@@ -797,22 +834,34 @@ static void mqtt_task(void *param) {
 
         
 
+        mqtt_diag_set_stage(MQTT_DIAG_STAGE_SUBSCRIBED);
         mqtt_publish_ha_availability(client_id, "online");
+        mqtt_diag_set_stage(MQTT_DIAG_STAGE_AVAILABILITY);
         if (state_diag_mode == MQTT_STATE_DIAG_NONE && first_connect) {
           ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-          mqtt_publish_ha_discovery(client_id);
-          first_connect = false;
+          if (mqtt_publish_ha_discovery(client_id)) {
+            first_connect = false;
+          } else {
+            mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_FAIL);
+            ESP_LOGW(SGO_LOG_NOSEND, "@MQTT Discovery publish failed, will retry on next connect");
+          }
         }
         if (state_diag_mode == MQTT_STATE_DIAG_NONE) {
           mqtt_publish_ha_state();
+          mqtt_diag_set_stage(MQTT_DIAG_STAGE_STATE_ON_CONNECT);
           last_ha_publish = xTaskGetTickCount();
           mqtt_publish_diag(client_id);
           last_diag_publish = xTaskGetTickCount();
         } else {
           mqtt_publish_ha_state_diag(state_diag_mode, client_id);
+          mqtt_diag_set_stage(MQTT_DIAG_STAGE_STATE_ON_CONNECT);
         }
       } 
     }
+    if (was_connected && !connected) {
+      mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCONNECTED);
+    }
+    was_connected = connected;
     if (connected) {
       if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
           (xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {

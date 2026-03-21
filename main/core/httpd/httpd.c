@@ -29,6 +29,8 @@
 #include "../log/log.h"
 
 #define IS_URI_SEP(c) (c == '?' || c == '&' || c == '=')
+#define MQTT_DIAG_KEY_STAGE "MQTT_STG"
+#define MQTT_DIAG_KEY_DISC_IDX "MQTT_DIDX"
 
 
 esp_err_t download_get_handler(httpd_req_t *req);
@@ -286,6 +288,41 @@ static esp_err_t get_ip_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
+  if (auth_request(req) == false) {
+    return 0;
+  }
+
+  int32_t mqtt_stage = hasi32(MQTT_DIAG_KEY_STAGE) ? geti32(MQTT_DIAG_KEY_STAGE) : -1;
+  int32_t mqtt_disc_idx = hasi32(MQTT_DIAG_KEY_DISC_IDX) ? geti32(MQTT_DIAG_KEY_DISC_IDX) : -1;
+  int state = get_state();
+  int wifi_status = get_wifi_status();
+  int n_restarts = get_n_restarts();
+  char broker_url[MAX_KVALUE_SIZE] = {0};
+  char broker_clientid[MAX_KVALUE_SIZE] = {0};
+  char ret[1024] = {0};
+
+  getstr(BROKER_URL, broker_url, sizeof(broker_url) - 1);
+  getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
+
+  snprintf(ret, sizeof(ret),
+      "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
+      "\"wifi_status\":%d,\"n_restarts\":%d,\"broker_url\":\"%s\","
+      "\"broker_clientid\":\"%s\"}",
+      (long)mqtt_stage,
+      (long)mqtt_disc_idx,
+      state,
+      wifi_status,
+      n_restarts,
+      broker_url,
+      broker_clientid);
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_send(req, ret, strlen(ret));
+  return ESP_OK;
+}
+
 httpd_uri_t uri_geti = {
   .uri      = "/i",
   .method   = HTTP_GET,
@@ -328,6 +365,13 @@ httpd_uri_t uri_get_ip = {
   .user_ctx = NULL
 };
 
+httpd_uri_t uri_get_mqttdiag = {
+  .uri      = "/mqttdiag",
+  .method   = HTTP_GET,
+  .handler  = mqttdiag_get_handler,
+  .user_ctx = NULL
+};
+
 httpd_uri_t file_download = {
 	.uri       = "/fs/?*",
 	.method    = HTTP_GET,
@@ -364,7 +408,7 @@ static void start_webserver_task(void *args) {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.lru_purge_enable = true;
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 10;
+  config.max_uri_handlers = 11;
 
   if (httpd_start(&server, &config) == ESP_OK) {
     httpd_register_uri_handler(server, &uri_geti);
@@ -373,6 +417,7 @@ static void start_webserver_task(void *args) {
     httpd_register_uri_handler(server, &uri_setstr);
     httpd_register_uri_handler(server, &uri_setsigningkey);
     httpd_register_uri_handler(server, &uri_get_ip);
+    httpd_register_uri_handler(server, &uri_get_mqttdiag);
     httpd_register_uri_handler(server, &file_download);
 		httpd_register_uri_handler(server, &file_upload);
 		httpd_register_uri_handler(server, &file_delete);
