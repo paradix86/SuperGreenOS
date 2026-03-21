@@ -67,12 +67,6 @@ typedef enum {
   MQTT_STATE_DIAG_S4D = 4,
 } mqtt_state_diag_mode_t;
 
-typedef enum {
-  MQTT_PERIODIC_DIAG_NONE = 0,
-  MQTT_PERIODIC_DIAG_Q6 = 1,
-  MQTT_PERIODIC_DIAG_Q7 = 2,
-} mqtt_periodic_diag_mode_t;
-
 static void build_ha_device_name(char *dest, size_t len, const char *client_id) {
   snprintf(dest, len, "SuperGreen %s", client_id);
 }
@@ -477,24 +471,6 @@ static mqtt_state_diag_mode_t mqtt_state_diag_mode_from_client_id(const char *cl
   return MQTT_STATE_DIAG_NONE;
 }
 
-static mqtt_periodic_diag_mode_t mqtt_periodic_diag_mode_from_client_id(const char *client_id) {
-  if (client_id == NULL) {
-    return MQTT_PERIODIC_DIAG_NONE;
-  }
-  size_t n = strlen(client_id);
-  if (n < 3) {
-    return MQTT_PERIODIC_DIAG_NONE;
-  }
-  const char *suffix = client_id + n - 3;
-  if (strcmp(suffix, "-q6") == 0) {
-    return MQTT_PERIODIC_DIAG_Q6;
-  }
-  if (strcmp(suffix, "-q7") == 0) {
-    return MQTT_PERIODIC_DIAG_Q7;
-  }
-  return MQTT_PERIODIC_DIAG_NONE;
-}
-
 static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *client_id) {
   char topic[MAX_KVALUE_SIZE] = {0};
   char payload[1400] = {0};
@@ -785,9 +761,7 @@ static void mqtt_task(void *param) {
   }
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Log clientid: %s", client_id);
   mqtt_state_diag_mode_t state_diag_mode = mqtt_state_diag_mode_from_client_id(client_id);
-  mqtt_periodic_diag_mode_t periodic_diag_mode = mqtt_periodic_diag_mode_from_client_id(client_id);
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT State diag mode=%d", (int)state_diag_mode);
-  ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Periodic diag mode=%d", (int)periodic_diag_mode);
 
   
 
@@ -824,24 +798,12 @@ static void mqtt_task(void *param) {
         
 
         mqtt_publish_ha_availability(client_id, "online");
-        if (periodic_diag_mode != MQTT_PERIODIC_DIAG_NONE) {
-          if (first_connect) {
-            ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-            mqtt_publish_ha_discovery(client_id);
-            first_connect = false;
-          }
-          mqtt_publish_ha_state();
-          last_ha_publish = xTaskGetTickCount();
-          if (periodic_diag_mode == MQTT_PERIODIC_DIAG_Q7) {
-            mqtt_publish_diag(client_id);
-            last_diag_publish = xTaskGetTickCount();
-          }
-        } else if (state_diag_mode == MQTT_STATE_DIAG_NONE) {
-          if (first_connect) {
-            ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-            mqtt_publish_ha_discovery(client_id);
-            first_connect = false;
-          }
+        if (state_diag_mode == MQTT_STATE_DIAG_NONE && first_connect) {
+          ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
+          mqtt_publish_ha_discovery(client_id);
+          first_connect = false;
+        }
+        if (state_diag_mode == MQTT_STATE_DIAG_NONE) {
           mqtt_publish_ha_state();
           last_ha_publish = xTaskGetTickCount();
           mqtt_publish_diag(client_id);
@@ -852,28 +814,16 @@ static void mqtt_task(void *param) {
       } 
     }
     if (connected) {
-      if (periodic_diag_mode != MQTT_PERIODIC_DIAG_NONE) {
-        if ((xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
-          mqtt_publish_ha_state();
-          last_ha_publish = xTaskGetTickCount();
-        }
-        if (periodic_diag_mode == MQTT_PERIODIC_DIAG_Q7 &&
-            (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
-          mqtt_publish_diag(client_id);
-          last_diag_publish = xTaskGetTickCount();
-        }
-      } else {
-        if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
-            (xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
-          mqtt_publish_ha_state();
-          last_ha_publish = xTaskGetTickCount();
-        }
+      if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
+          (xTaskGetTickCount() - last_ha_publish) >= pdMS_TO_TICKS(HA_STATE_PUBLISH_PERIOD_MS)) {
+        mqtt_publish_ha_state();
+        last_ha_publish = xTaskGetTickCount();
+      }
 
-        if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
-            (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
-          mqtt_publish_diag(client_id);
-          last_diag_publish = xTaskGetTickCount();
-        }
+      if (state_diag_mode == MQTT_STATE_DIAG_NONE &&
+          (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
+        mqtt_publish_diag(client_id);
+        last_diag_publish = xTaskGetTickCount();
       }
 
       
