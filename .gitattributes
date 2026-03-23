@@ -1,0 +1,2 @@
+main/m5tft/utils/characters/**/*.svg text eol=crlf
+main/m5tft/utils/characters/**/config.yml text eol=crlf
