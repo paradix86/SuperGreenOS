@@ -1,0 +1,41 @@
+model = "gpt-5"
+model_reasoning_effort = "high"
+approval_policy = "untrusted"
+sandbox_mode = "workspace-write"
+network_access = false
+show_reasoning_summaries = true
+notify = ["osascript", "-e", "display notification \"Codex task finished\" with title \"SuperGreenOS\""]
+project_doc_max_bytes = 65536
+
+[tools]
+web_search = false
+image_generation = false
+
+[history]
+persist = true
+max_bytes = 524288
+
+[env_policy]
+inherit = "core"
+ignore_default_excludes = false
+
+[agents]
+enabled = true
+max_threads = 4
+max_depth = 1
+
+[profiles.readonly]
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+model_reasoning_effort = "medium"
+
+[profiles.offline_build]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+
+[profiles.live_guarded]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+model_reasoning_effort = "high"
+network_access = false

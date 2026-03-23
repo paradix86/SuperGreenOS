@@ -1,39 +1,50 @@
 # Documentation
 
-This folder is the lightweight documentation home for `SuperGreenOS`.
+This folder is the operational documentation home for `SuperGreenOS`.
 
-It is intentionally plain Markdown so it works well:
-
-- directly in GitHub
-- inside the repository during development
-- as a future source for a docs site such as Mintlify or MkDocs
-
-## Start Here
+## Start here
 
 - [Environment Setup](./environment-setup.md)
-- [Build And OTA](./build-and-ota.md)
+- [Build and OTA](./build-and-ota.md)
+- [OTA Delivery Only](./ota-delivery-only.md)
+- [Live Experiment Emergency Recovery](./live-experiment-emergency-recovery.md)
+- [Config Recovery](./config-recovery.md)
 - [UI Customization](./ui-customization.md)
 - [Backend Roadmap](./backend-roadmap.md)
-- [Config Recovery](./config-recovery.md)
-- [Live Experiment Emergency Recovery](./live-experiment-emergency-recovery.md)
 
-Current notable validated topics:
+## What is currently proven
 
-- modern Ubuntu build flow for ESP-IDF `3.3.1`
-- canonical `update_config.sh -> update_templates.sh -> update_htmlapp.sh` generation order
-- maintenance OTA plus mandatory UI restore
-- fallback AP recovery after maintenance OTA
-- reboot-loop postmortem and NVS reset behavior on the legacy controller
-- SPIFFS size limits on the legacy controller
-- first deployed backend module: `sensor_health`
-- relationship between this repo and `SuperGreenOSBoilerplate`
-- config recovery after NVS erase — exported JSON as recovery source, LED/timer chain, motor brownout investigation
-- canonical emergency abort path for unstable live experiments (`BOX_0` kept active, unreachable broker stabilization)
+- ESP-IDF `3.3.1` legacy `make` build works on modern Ubuntu when generation order is respected.
+- The required generation order is:
+  1. `update_config.sh`
+  2. `update_templates.sh`
+  3. `update_htmlapp.sh`
+- Clean compile requires:
+  - `source ~/esp/esp-idf_release_3.3.1/export.sh`
+  - `make defconfig`
+  - `make -j4`
+- Emergency stabilization of the live controller is standardized and documented.
+- OTA delivery and MQTT/fix validation must be treated as **two separate phases**.
 
-## Suggested rule
+## Important operational split
 
-Keep:
+### OTA-delivery-only phase
 
-- short onboarding in the root `README.md`
-- repo-specific operational notes in `Agents.md`
-- longer task-oriented guides in this `docs/` folder
+Goal:
+- prove the new firmware is actually fetched and installed
+
+Only after:
+- controller fetches `last_timestamp`
+- controller fetches `firmware.bin`
+- controller comes back
+- `OTA_TIMESTAMP` equals the newly built package timestamp
+
+does MQTT validation become meaningful.
+
+### MQTT validation phase
+
+This is separate and must happen only after OTA delivery is proven.
+
+## See also
+
+- Repo-level guardrails and Codex instructions live in `../Agents.md`.

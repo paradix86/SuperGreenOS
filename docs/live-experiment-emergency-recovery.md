@@ -10,15 +10,14 @@ This runbook is mandatory for any live controller experiment that causes:
 Primary goals:
 
 - keep `BOX_0` running for the plants
-- stop MQTT-triggered reboot loops immediately
+- stop runtime-triggered loops immediately
 - restore a stable and reachable controller state
 
 Important rule on unstable diagnostic firmware:
 
 - use `mqtt://192.168.1.1:9999` first as the emergency broker target
 - do **not** use `sink2` as the immediate emergency target
-
----
+- if a **local preflight-only failure** happens before the controller is touched (for example local OTA server startup failure), do not change the controller just to “recover”; simply stop and fix the local blocker
 
 ## Canonical emergency sequence
 
@@ -35,9 +34,7 @@ Apply all POST writes with retry loops:
    - `WIFI_STATUS = 3`
    - `BOX_0_ENABLED = 1`
    - `N_RESTARTS` stable over repeated checks
-   - `LED_0_DUTY` and `BOX_0_BLOWER_DUTY` are logged/reported (not hard-fail gates)
-
----
+   - `LED_0_DUTY` and `BOX_0_BLOWER_DUTY` are logged/reported only (not hard-fail gates)
 
 ## Canonical script
 
@@ -45,17 +42,3 @@ Apply all POST writes with retry loops:
 cd /home/alan/sources/SuperGreenOS
 bash ./scripts/emergency_recover_controller.sh 192.168.1.104
 ```
-
-Behavior:
-
-- applies the canonical emergency sequence with retries
-- reboots as needed
-- keeps verifying all required runtime values
-- exits only after stability checks pass
-
----
-
-## Next-step rule after emergency stabilization
-
-After emergency recovery is successful, decide next steps separately.
-Do not resume live experiment steps until stability is confirmed.
