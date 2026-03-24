@@ -30,6 +30,7 @@
 #include "../log/log.h"
 #include "../kv/kv.h"
 #include "../wifi/wifi.h"
+#include "../ota/ota.h"
 
 
 
@@ -644,7 +645,8 @@ static void parse_ha_command(esp_mqtt_event_handle_t event) {
   build_ha_command_topic(expected, sizeof(expected), client_id, "ota_start");
   if (strcmp(topic, expected) == 0) {
     if (strcmp(payload, "PRESS") == 0) {
-      set_ota_start(1);
+      int v = request_ota_start(1);
+      set_ota_start(v);
     }
     return;
   }
@@ -723,7 +725,11 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
     case MQTT_EVENT_CONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_CONNECTED");
       connected = true;
-      xQueueSend(cmd, &CMD_MQTT_CONNECTED, 0);
+      if (cmd == NULL) {
+        ESP_LOGE(SGO_LOG_NOSEND, "@MQTT CMD_MQTT_CONNECTED queue is NULL");
+      } else if (xQueueSend(cmd, &CMD_MQTT_CONNECTED, 0) != pdTRUE) {
+        ESP_LOGE(SGO_LOG_NOSEND, "@MQTT CMD_MQTT_CONNECTED enqueue failed");
+      }
       break;
     case MQTT_EVENT_DISCONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_DISCONNECTED");

@@ -376,8 +376,27 @@ void init_ota() {
 
 /* KV Callbacks */
 
-int on_set_ota_start(int value) {
+int request_ota_start(int value) {
+  if (value != 1) {
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA request_ota_start ignored non-start value=%d", value);
+    return value;
+  }
+
+  if (cmd == NULL) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA request_ota_start queue is NULL");
+    return 0;
+  }
+
   uint8_t cmd_data = 1;
-  xQueueSend(cmd, &cmd_data, 0);
-  return value;
+  if (xQueueSend(cmd, &cmd_data, pdMS_TO_TICKS(100)) != pdTRUE) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA request_ota_start enqueue failed");
+    return 0;
+  }
+
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA request_ota_start dispatched");
+  return 1;
+}
+
+int on_set_ota_start(int value) {
+  return request_ota_start(value);
 }
