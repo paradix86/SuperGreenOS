@@ -37,7 +37,7 @@ void loop_hx711(int i2cId) {
 	};
 
 	esp_err_t r = hx711_init(&dev);
-	if (r == ESP_OK) {
+	if (r != ESP_OK) {
 		ESP_LOGW(SGO_LOG_NOSEND, "@HX711 Could not initialize HX711: %d (%s)", r, esp_err_to_name(r));
 		set_hx711_present(i2cId, 0);
 		return;

@@ -88,7 +88,7 @@ int get_output_for_time(int boxId) {
 
 void start_season(int boxId) {
   ESP_LOGI(SGO_LOG_NOSEND, "@SEASON start_season");
-  season_task();
+  season_task(boxId);
 }
 
 void stop_season(int boxId) {

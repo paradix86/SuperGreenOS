@@ -19,8 +19,8 @@
 #ifndef SEASON_SIMULATOR_H_
 #define SEASON_SIMULATOR_H_
 
-void start_season();
-void stop_season();
-void season_task();
+void start_season(int boxId);
+void stop_season(int boxId);
+void season_task(int boxId);
 
 #endif

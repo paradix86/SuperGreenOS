@@ -204,6 +204,7 @@ static void try_ota(const char *new_timestamp)
   esp_ota_handle_t update_handle = 0 ;
   const esp_partition_t *update_partition = NULL;
 
+  binary_file_length = 0;
   ESP_LOGI(SGO_LOG_NOSEND, "@OTA Starting OTA");
 
   const esp_partition_t *configured = esp_ota_get_boot_partition();
@@ -272,12 +273,14 @@ static void try_ota(const char *new_timestamp)
     int buff_len = recv(socket_id, text, TEXT_BUFFSIZE, 0);
     if (buff_len < 0) { /*receive error*/
       ESP_LOGE(SGO_LOG_NOSEND, "@OTA Error: receive data error! errno=%d", errno);
+      esp_ota_end(update_handle);
       close(socket_id);
       return;
     } else if (buff_len > 0 && !resp_body_start) {  /*deal with response header*/
       // only start ota when server response 200 state code
       if (strstr(text, "200") == NULL && !http_200_flag) {
         ESP_LOGE(SGO_LOG_NOSEND, "@OTA ota url is invalid or bin does not exist");
+        esp_ota_end(update_handle);
         close(socket_id);
         return;
       }
@@ -289,6 +292,7 @@ static void try_ota(const char *new_timestamp)
       err = esp_ota_write( update_handle, (const void *)ota_write_data, buff_len);
       if (err != ESP_OK) {
         ESP_LOGE(SGO_LOG_NOSEND, "@OTA Error: esp_ota_write failed (%s)!", esp_err_to_name(err));
+        esp_ota_end(update_handle);
         close(socket_id);
         return;
       }
