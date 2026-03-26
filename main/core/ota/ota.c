@@ -22,7 +22,11 @@
  */
 
 #include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <errno.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <stdbool.h>
 
@@ -43,6 +47,7 @@
 
 #define BUFFSIZE 1024
 #define TEXT_BUFFSIZE 1024
+#define OTA_RECV_TIMEOUT_S 5
 
 #define OTA_BUILD_TIMESTAMP_BCK "O_B_T_BCK"
 
@@ -55,6 +60,24 @@ static int binary_file_length = 0;
 static int socket_id = -1;
 
 static QueueHandle_t cmd;
+
+typedef enum {
+  OTA_VERSION_CHECK_ERROR = -1,
+  OTA_VERSION_CHECK_UP_TO_DATE = 0,
+  OTA_VERSION_CHECK_UPDATE_AVAILABLE = 1,
+} ota_version_check_result;
+
+static bool set_socket_recv_timeout(int sock, int timeout_s) {
+  struct timeval tv = {
+    .tv_sec = timeout_s,
+    .tv_usec = 0,
+  };
+  if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed to set recv timeout! errno=%d", errno);
+    return false;
+  }
+  return true;
+}
 
 /*read buffer by byte still delim ,return read bytes counts*/
 static int read_until(char *buffer, char delim, int len)
@@ -134,7 +157,7 @@ static bool connect_to_http_server()
  return false;
 }
 
-static bool check_new_version(char *new_timestamp, int len) {
+static ota_version_check_result check_new_version(char *new_timestamp, int len) {
   char hostname[128] = {0}; get_ota_server_hostname(hostname, 128);
   int16_t port = get_ota_server_port();
   char basedir[128] = {0}; get_ota_basedir(basedir, 128);
@@ -144,7 +167,12 @@ static bool check_new_version(char *new_timestamp, int len) {
   } else {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA Connect to http server failed!");
     close(socket_id);
-    return false;
+    return OTA_VERSION_CHECK_ERROR;
+  }
+
+  if (!set_socket_recv_timeout(socket_id, OTA_RECV_TIMEOUT_S)) {
+    close(socket_id);
+    return OTA_VERSION_CHECK_ERROR;
   }
 
   /*send GET request to http server*/
@@ -158,7 +186,7 @@ static bool check_new_version(char *new_timestamp, int len) {
   if (get_len < 0) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed to allocate memory for GET request buffer");
     close(socket_id);
-    return false;
+    return OTA_VERSION_CHECK_ERROR;
   }
   int res = send(socket_id, http_request, get_len, 0);
   free(http_request);
@@ -166,7 +194,7 @@ static bool check_new_version(char *new_timestamp, int len) {
   if (res < 0) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA Send GET request to server failed");
     close(socket_id);
-    return false;
+    return OTA_VERSION_CHECK_ERROR;
   } else {
     ESP_LOGI(SGO_LOG_NOSEND, "@OTA Send GET request to server succeeded");
   }
@@ -174,7 +202,12 @@ static bool check_new_version(char *new_timestamp, int len) {
   int i = 0;
   char buf;
   while (i < 4) {
-    if (recv(socket_id, &buf, 1, 0) != 1) return false;
+    int header_res = recv(socket_id, &buf, 1, 0);
+    if (header_res != 1) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed while reading timestamp header errno=%d", errno);
+      close(socket_id);
+      return OTA_VERSION_CHECK_ERROR;
+    }
     if (buf == '\n' || buf == '\r') ++i;
     else i = 0;
   }
@@ -183,13 +216,51 @@ static bool check_new_version(char *new_timestamp, int len) {
 
   int ota_build_timestamp = get_ota_timestamp();
   char timestamp[15] = {0};
-  while(recv(socket_id, &(timestamp[strlen(timestamp)]), sizeof(timestamp) - strlen(timestamp) - 1, 0) > 0);
-  ESP_LOGI(SGO_LOG_NOSEND, "@OTA OTA TIMESTAMP: %d (build: %d)", atoi(timestamp), ota_build_timestamp);
+  size_t timestamp_len = 0;
+  while (timestamp_len < sizeof(timestamp) - 1) {
+    int read_len = recv(socket_id, &timestamp[timestamp_len], (sizeof(timestamp) - 1) - timestamp_len, 0);
+    if (read_len < 0) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed while reading timestamp body errno=%d", errno);
+      close(socket_id);
+      return OTA_VERSION_CHECK_ERROR;
+    }
+    if (read_len == 0) {
+      break;
+    }
+    timestamp_len += read_len;
+  }
+  timestamp[timestamp_len] = '\0';
   close(socket_id);
 
-  int itimestamp = atoi(timestamp);
+  char *start = timestamp;
+  while (*start && isspace((unsigned char)*start)) {
+    ++start;
+  }
+  char *end = start + strlen(start);
+  while (end > start && isspace((unsigned char)*(end - 1))) {
+    --end;
+    *end = '\0';
+  }
+
+  if (*start == '\0') {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA Empty OTA timestamp response");
+    return OTA_VERSION_CHECK_ERROR;
+  }
+
+  char *parse_end = NULL;
+  long parsed_timestamp = strtol(start, &parse_end, 10);
+  if (*parse_end != '\0') {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA Malformed OTA timestamp response: '%s'", start);
+    return OTA_VERSION_CHECK_ERROR;
+  }
+
+  int itimestamp = (int)parsed_timestamp;
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA OTA TIMESTAMP: %d (build: %d)", itimestamp, ota_build_timestamp);
   snprintf(new_timestamp, len, "%d", itimestamp);
-  return ota_build_timestamp < itimestamp;
+  if (ota_build_timestamp < itimestamp) {
+    return OTA_VERSION_CHECK_UPDATE_AVAILABLE;
+  }
+  return OTA_VERSION_CHECK_UP_TO_DATE;
 }
 
 static void try_ota(const char *new_timestamp)
@@ -340,12 +411,16 @@ static void ota_task(void *pvParameter) {
       ESP_LOGI(SGO_LOG_NOSEND, "@OTA Checking firmware update available");
       ESP_LOGI(SGO_LOG_NOSEND, "@OTA timestamp=%d", ota_build_timestamp);
       char new_timestamp[15] = {0};
-      if (check_new_version(new_timestamp, sizeof(new_timestamp)-1)) {
+      ota_version_check_result check_result = check_new_version(new_timestamp, sizeof(new_timestamp)-1);
+      if (check_result == OTA_VERSION_CHECK_UPDATE_AVAILABLE) {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA Start OTA procedure");
         set_ota_status(OTA_STATUS_IN_PROGRESS);
         try_ota(new_timestamp);
-      } else {
+      } else if (check_result == OTA_VERSION_CHECK_UP_TO_DATE) {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA Firmware is up-to-date");
+        set_ota_status(OTA_STATUS_IDLE);
+      } else {
+        ESP_LOGE(SGO_LOG_NOSEND, "@OTA Firmware check failed (network/response error)");
         set_ota_status(OTA_STATUS_IDLE);
       }
     }
