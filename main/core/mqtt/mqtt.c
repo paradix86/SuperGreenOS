@@ -603,7 +603,7 @@ static void subscribe_cmd() {
   char client_id[MAX_KVALUE_SIZE] = {0};
   char topic[MAX_KVALUE_SIZE] = {0};
   get_broker_clientid(client_id, sizeof(client_id) - 1);
-  sprintf(cmd_channel, "%s.cmd", client_id);
+  snprintf(cmd_channel, sizeof(cmd_channel), "%s.cmd", client_id);
 
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT subscribe_cmd %s", cmd_channel);
   esp_mqtt_client_subscribe(client, cmd_channel, 2);
@@ -685,13 +685,21 @@ static void parse_cmd(esp_mqtt_event_handle_t event) {
     char signingKey[33] = {0};
     getstr(SIGNING_KEY, signingKey, 33);
     char hash[65] = {0};
-    strncpy(hash, event->data, 64);
     char cmd[MAX_REMOTE_CMD_LENGTH + 1] = {0};
-    strncpy(cmd, &(event->data[65]), event->data_len - 65);
+    size_t hash_len = event->data_len < 64 ? (size_t)event->data_len : 64;
+    memcpy(hash, event->data, hash_len);
+    hash[hash_len] = 0;
+
+    size_t cmd_len = (size_t)event->data_len - 65;
+    if (cmd_len > MAX_REMOTE_CMD_LENGTH) {
+      cmd_len = MAX_REMOTE_CMD_LENGTH;
+    }
+    memcpy(cmd, &(event->data[65]), cmd_len);
+    cmd[cmd_len] = 0;
 
     char cmdSeeded[MAX_REMOTE_CMD_LENGTH + 33 + 1] = {0};
     uint8_t localHashBin[32] = {0};
-    sprintf(cmdSeeded, "%s:%s", signingKey, cmd);
+    snprintf(cmdSeeded, sizeof(cmdSeeded), "%s:%s", signingKey, cmd);
 
     //ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Hash: %s - Cmd: %s", hash, cmd);
     mbedtls_sha256_context sha256_ctx;
