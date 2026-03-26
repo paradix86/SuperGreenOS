@@ -29,11 +29,10 @@
  * [GENERATED]
  */
 
-StaticSemaphore_t mutex_buffer;
-
 <% Object.keys(modules).filter(m => modules[m].enabled).forEach(m => {
   Object.keys(modules[m].fields).filter(f => !modules[m].fields[f].disabled && !modules[m].fields[f].indir.enable).forEach(f => { f = modules[m].fields[f] %>
 
+  static StaticSemaphore_t _mutex_<%= f.name %>_buffer;
   static SemaphoreHandle_t _mutex_<%= f.name %>; // TODO check RAM weight of creating so many semaphores :/
   static bool _<%= f.name %>_changed = true;
   static bool _<%= f.name %>_undefined = true;
@@ -164,7 +163,7 @@ StaticSemaphore_t mutex_buffer;
 void init_helpers() {
   <% Object.keys(modules).filter(m => modules[m].enabled).forEach(m => {
     Object.keys(modules[m].fields).filter(f => !modules[m].fields[f].disabled && !modules[m].fields[f].indir.enable).forEach(f => { f = modules[m].fields[f]%>
-    if ((_mutex_<%= f.name %> = xSemaphoreCreateMutexStatic(&mutex_buffer)) == NULL) {
+    if ((_mutex_<%= f.name %> = xSemaphoreCreateMutexStatic(&_mutex_<%= f.name %>_buffer)) == NULL) {
       ESP_LOGI(SGO_LOG_NOSEND, "Could not create semaphore !!!");
     }
   <% })}) %>
