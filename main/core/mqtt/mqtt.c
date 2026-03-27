@@ -602,8 +602,13 @@ static void subscribe_cmd() {
   char cmd_channel[MAX_KVALUE_SIZE] = {0};
   char client_id[MAX_KVALUE_SIZE] = {0};
   char topic[MAX_KVALUE_SIZE] = {0};
+  int cmd_channel_len = 0;
   get_broker_clientid(client_id, sizeof(client_id) - 1);
-  snprintf(cmd_channel, sizeof(cmd_channel), "%s.cmd", client_id);
+  cmd_channel_len = snprintf(cmd_channel, sizeof(cmd_channel), "%s.cmd", client_id);
+  if (cmd_channel_len < 0 || cmd_channel_len >= (int)sizeof(cmd_channel)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@MQTT subscribe_cmd channel truncated for client_id");
+    return;
+  }
 
   ESP_LOGI(SGO_LOG_NOSEND, "@MQTT subscribe_cmd %s", cmd_channel);
   esp_mqtt_client_subscribe(client, cmd_channel, 2);
