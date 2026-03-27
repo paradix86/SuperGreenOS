@@ -125,6 +125,7 @@ static bool read_past_http_header(char text[], int total_len, esp_ota_handle_t u
 
 static bool connect_to_http_server()
 {
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA connect_to_http_server reached");
   char server_ip[20] = {0}; get_ota_server_ip(server_ip, 20);
   int16_t port = get_ota_server_port();
   ESP_LOGI(SGO_LOG_NOSEND, "@OTA Server IP: %s Server Port: %d", server_ip, port);
@@ -161,6 +162,7 @@ static ota_version_check_result check_new_version(char *new_timestamp, int len) 
   char hostname[128] = {0}; get_ota_server_hostname(hostname, 128);
   int16_t port = get_ota_server_port();
   char basedir[128] = {0}; get_ota_basedir(basedir, 128);
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA check_new_version start host=%s port=%d basedir=%s", hostname, port, basedir);
   /*connect to http server*/
   if (connect_to_http_server()) {
     ESP_LOGI(SGO_LOG_NOSEND, "@OTA Connected to http server");
@@ -188,6 +190,7 @@ static ota_version_check_result check_new_version(char *new_timestamp, int len) 
     close(socket_id);
     return OTA_VERSION_CHECK_ERROR;
   }
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA Attempting GET %s/last_timestamp", basedir);
   int res = send(socket_id, http_request, get_len, 0);
   free(http_request);
 
@@ -401,7 +404,9 @@ static void ota_task(void *pvParameter) {
   uint8_t c;
 
   while (true) {
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA Waiting for OTA command");
     while(!xQueueReceive(cmd, &c, portMAX_DELAY));
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA Dequeued OTA command c=%u", (unsigned int)c);
 
     int ota_build_timestamp = get_ota_timestamp();
     if (ota_build_timestamp == 0) {
@@ -467,6 +472,8 @@ int request_ota_start(int value) {
   }
 
   uint8_t cmd_data = 1;
+  UBaseType_t queue_space = uxQueueSpacesAvailable(cmd);
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA request_ota_start enqueue attempt queue_space=%u", (unsigned int)queue_space);
   if (xQueueSend(cmd, &cmd_data, pdMS_TO_TICKS(100)) != pdTRUE) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA request_ota_start enqueue failed");
     return 0;
