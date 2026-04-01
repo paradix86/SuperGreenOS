@@ -933,7 +933,7 @@ void init_mqtt() {
 
   
 
-  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 8192, NULL, 10, &s_mqtt_task_handle, 1);
+  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 16384, NULL, 10, &s_mqtt_task_handle, 1);
   if (ret != pdPASS) {
     ESP_LOGE(SGO_LOG_NOSEND, "@MQTT Failed to create task");
   }
