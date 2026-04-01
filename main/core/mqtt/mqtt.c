@@ -45,7 +45,6 @@ bool connected = false;
 #define MAX_REMOTE_CMD_LENGTH MAX_CMD_LENGTH-10 // keeps some space for the -r true parameter
 
 static esp_mqtt_client_handle_t client;
-static TaskHandle_t s_mqtt_task_handle = NULL;
 
 static QueueHandle_t cmd;
 static QueueHandle_t log_queue;
@@ -57,11 +56,13 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 #define HA_DISCOVERY_PREFIX "homeassistant"
 #define HA_STATE_PUBLISH_PERIOD_MS (30 * 1000)
 #define HA_DISCOVERY_PUBLISH_DELAY_MS 75
+#define MQTT_DISCOVERY_CONNECT_COOLDOWN_MS 2000
 #define DIAG_PUBLISH_PERIOD_MS (5 * 60 * 1000)
 
 #define MAX_LOG_QUEUE_ITEMS 25
 #define MQTT_DIAG_KEY_STAGE "MQTT_STG"
 #define MQTT_DIAG_KEY_DISC_IDX "MQTT_DIDX"
+#define MQTT_DIAG_KEY_STACK_HWM "MQTT_HWM"
 
 typedef enum {
   MQTT_STATE_DIAG_NONE = 0,
@@ -747,9 +748,6 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
       break;
     case MQTT_EVENT_DISCONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_DISCONNECTED");
-      ESP_LOGI(SGO_LOG_NOSEND, "@MQTT mqtt_hwm_cb=%d mqtt_hwm_wrapper=%d",
-               (int)uxTaskGetStackHighWaterMark(NULL),
-               (int)uxTaskGetStackHighWaterMark(s_mqtt_task_handle));
       connected = false;
       break;
     case MQTT_EVENT_SUBSCRIBED:
@@ -847,6 +845,7 @@ static void mqtt_task(void *param) {
 
 
   while(true) {
+    seti32(MQTT_DIAG_KEY_STACK_HWM, (int32_t)uxTaskGetStackHighWaterMark(NULL));
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {
         mqtt_diag_set_stage(MQTT_DIAG_STAGE_CONNECTED);
@@ -862,7 +861,10 @@ static void mqtt_task(void *param) {
         mqtt_diag_set_stage(MQTT_DIAG_STAGE_AVAILABILITY);
         if (state_diag_mode == MQTT_STATE_DIAG_NONE && first_connect) {
           ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-          if (mqtt_publish_ha_discovery(client_id)) {
+          vTaskDelay(pdMS_TO_TICKS(MQTT_DISCOVERY_CONNECT_COOLDOWN_MS));
+          if (!(connected && client != NULL)) {
+            ESP_LOGW(SGO_LOG_NOSEND, "@MQTT Skip discovery: disconnected before first-connect discovery");
+          } else if (mqtt_publish_ha_discovery(client_id)) {
             first_connect = false;
           } else {
             mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_FAIL);
@@ -896,9 +898,6 @@ static void mqtt_task(void *param) {
           (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
         mqtt_publish_diag(client_id);
         last_diag_publish = xTaskGetTickCount();
-        ESP_LOGI(SGO_LOG_NOSEND, "@MQTT mqtt_hwm_cb=%d mqtt_hwm_wrapper=%d",
-                 (int)uxTaskGetStackHighWaterMark(NULL),
-                 (int)uxTaskGetStackHighWaterMark(s_mqtt_task_handle));
       }
 
       
@@ -933,7 +932,7 @@ void init_mqtt() {
 
   
 
-  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 16384, NULL, 10, &s_mqtt_task_handle, 1);
+  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 16384, NULL, 10, NULL, 1);
   if (ret != pdPASS) {
     ESP_LOGE(SGO_LOG_NOSEND, "@MQTT Failed to create task");
   }

@@ -149,11 +149,13 @@ static int CMD_MQTT_FORCE_FLUSH = 2;
 #define HA_DISCOVERY_PREFIX "homeassistant"
 #define HA_STATE_PUBLISH_PERIOD_MS (30 * 1000)
 #define HA_DISCOVERY_PUBLISH_DELAY_MS 75
+#define MQTT_DISCOVERY_CONNECT_COOLDOWN_MS 2000
 #define DIAG_PUBLISH_PERIOD_MS (5 * 60 * 1000)
 
 #define MAX_LOG_QUEUE_ITEMS 25
 #define MQTT_DIAG_KEY_STAGE "MQTT_STG"
 #define MQTT_DIAG_KEY_DISC_IDX "MQTT_DIDX"
+#define MQTT_DIAG_KEY_STACK_HWM "MQTT_HWM"
 
 typedef enum {
   MQTT_STATE_DIAG_NONE = 0,
@@ -991,6 +993,7 @@ static void mqtt_task(void *param) {
 <% } %>
 
   while(true) {
+    seti32(MQTT_DIAG_KEY_STACK_HWM, (int32_t)uxTaskGetStackHighWaterMark(NULL));
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {
         mqtt_diag_set_stage(MQTT_DIAG_STAGE_CONNECTED);
@@ -1008,7 +1011,10 @@ static void mqtt_task(void *param) {
         mqtt_diag_set_stage(MQTT_DIAG_STAGE_AVAILABILITY);
         if (state_diag_mode == MQTT_STATE_DIAG_NONE && first_connect) {
           ESP_LOGI(SGO_LOG_NOSEND, "@MQTT First connect");
-          if (mqtt_publish_ha_discovery(client_id)) {
+          vTaskDelay(pdMS_TO_TICKS(MQTT_DISCOVERY_CONNECT_COOLDOWN_MS));
+          if (!(connected && client != NULL)) {
+            ESP_LOGW(SGO_LOG_NOSEND, "@MQTT Skip discovery: disconnected before first-connect discovery");
+          } else if (mqtt_publish_ha_discovery(client_id)) {
             first_connect = false;
           } else {
             mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_FAIL);
