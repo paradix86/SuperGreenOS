@@ -45,6 +45,7 @@ bool connected = false;
 #define MAX_REMOTE_CMD_LENGTH MAX_CMD_LENGTH-10 // keeps some space for the -r true parameter
 
 static esp_mqtt_client_handle_t client;
+static TaskHandle_t s_mqtt_task_handle = NULL;
 
 static QueueHandle_t cmd;
 static QueueHandle_t log_queue;
@@ -746,6 +747,9 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
       break;
     case MQTT_EVENT_DISCONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT MQTT_EVENT_DISCONNECTED");
+      ESP_LOGI(SGO_LOG_NOSEND, "@MQTT mqtt_hwm_cb=%d mqtt_hwm_wrapper=%d",
+               (int)uxTaskGetStackHighWaterMark(NULL),
+               (int)uxTaskGetStackHighWaterMark(s_mqtt_task_handle));
       connected = false;
       break;
     case MQTT_EVENT_SUBSCRIBED:
@@ -892,6 +896,9 @@ static void mqtt_task(void *param) {
           (xTaskGetTickCount() - last_diag_publish) >= pdMS_TO_TICKS(DIAG_PUBLISH_PERIOD_MS)) {
         mqtt_publish_diag(client_id);
         last_diag_publish = xTaskGetTickCount();
+        ESP_LOGI(SGO_LOG_NOSEND, "@MQTT mqtt_hwm_cb=%d mqtt_hwm_wrapper=%d",
+                 (int)uxTaskGetStackHighWaterMark(NULL),
+                 (int)uxTaskGetStackHighWaterMark(s_mqtt_task_handle));
       }
 
       
@@ -926,7 +933,7 @@ void init_mqtt() {
 
   
 
-  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 8192, NULL, 10, NULL, 1);
+  BaseType_t ret = xTaskCreatePinnedToCore(mqtt_task, "MQTT", 8192, NULL, 10, &s_mqtt_task_handle, 1);
   if (ret != pdPASS) {
     ESP_LOGE(SGO_LOG_NOSEND, "@MQTT Failed to create task");
   }
