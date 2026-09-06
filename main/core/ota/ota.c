@@ -384,12 +384,19 @@ static void try_ota(const char *new_timestamp)
       close(socket_id);
       return;
     } else if (buff_len > 0 && !resp_body_start) {  /*deal with response header*/
-      // only start ota when server response 200 state code
-      if (strstr(text, "200") == NULL && !http_200_flag) {
-        ESP_LOGE(SGO_LOG_NOSEND, "@OTA ota url is invalid or bin does not exist");
-        esp_ota_end(update_handle);
-        close(socket_id);
-        return;
+      // only start ota when server responds with a 200 status line. The old
+      // check (strstr(text, "200")) matched any "200" anywhere in the headers,
+      // e.g. "Content-Length: 1200" on a 404 page, and would then happily
+      // "flash" that page as firmware.
+      if (!http_200_flag) {
+        bool has_status_line = strncmp(text, "HTTP/1.", 7) == 0;
+        bool is_200 = has_status_line && (strncmp(text + 9, "200", 3) == 0);
+        if (!has_status_line || !is_200) {
+          ESP_LOGE(SGO_LOG_NOSEND, "@OTA ota url is invalid or bin does not exist (bad status line)");
+          esp_ota_end(update_handle);
+          close(socket_id);
+          return;
+        }
       }
       http_200_flag = true;
       memcpy(ota_write_data, text, buff_len);
@@ -437,6 +444,24 @@ static void try_ota(const char *new_timestamp)
 // it a second OTA_START (double click, HA retry) was queued silently and ran right
 // after the first one finished, with OTA_START already back to 0.
 static volatile bool ota_request_pending = false;
+
+// With CONFIG_APP_ROLLBACK_ENABLE, an OTA-updated image boots in the
+// "pending verify" state; if it is never confirmed and the device reboots
+// again for any reason (crash, watchdog, power loss), the bootloader
+// automatically reverts to the previous working image. This task is the
+// confirmation: once the device has been up long enough to be past the
+// obvious early-init failures, mark the running image valid. Harmless to
+// call when nothing is pending (returns ESP_ERR_OTA_ROLLBACK_INVALID_STATE).
+static void confirm_valid_task(void *pvParameter) {
+  vTaskDelay(pdMS_TO_TICKS(OTA_MARK_VALID_DELAY_S * 1000));
+  esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+  if (err == ESP_OK) {
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA Running image confirmed valid, rollback cancelled");
+  } else if (err != ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@OTA esp_ota_mark_app_valid_cancel_rollback failed: %s", esp_err_to_name(err));
+  }
+  vTaskDelete(NULL);
+}
 
 static void ota_task(void *pvParameter) {
   uint8_t c;
@@ -498,6 +523,11 @@ void init_ota() {
 
   int ota_build_timestamp = get_ota_timestamp();
   ESP_LOGI(SGO_LOG_NOSEND, "@OTA OTA initialization timestamp=%d", ota_build_timestamp);
+
+  BaseType_t ret_confirm = xTaskCreatePinnedToCore(confirm_valid_task, "OTACONFIRM", 2048, NULL, tskIDLE_PRIORITY, NULL, 1);
+  if (ret_confirm != pdPASS) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed to create confirm-valid task");
+  }
 
   BaseType_t ret = xTaskCreatePinnedToCore(ota_task, "OTA", 8192, NULL, 5, NULL, 1);
   if (ret != pdPASS) {
