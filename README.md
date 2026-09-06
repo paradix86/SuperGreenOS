@@ -224,6 +224,7 @@ Verified timestamps include:
 
 - `1773751114`
 - `1773757485`
+- `1788688715` (2026-09-06, commit d045281, `SGOS_SPIFFS_FORMAT_ONCE=0`, served from a Windows host with `python -m http.server 8091 --directory releases`; UI kept)
 
 ## Verified OTA over Wi-Fi
 
