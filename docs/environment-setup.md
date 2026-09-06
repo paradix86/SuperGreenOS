@@ -107,7 +107,7 @@ Canonical order:
 
 ```bash
 cd /home/alan/sources/SuperGreenOS
-./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v3 config.controller.json
 bash ./update_templates.sh config.controller.json
 bash ./update_htmlapp.sh config.controller.json
 ```

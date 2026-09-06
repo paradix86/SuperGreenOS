@@ -14,7 +14,7 @@
 #
 # Environment overrides:
 #   IDF_PATH          ESP-IDF checkout            (default: $HOME/esp/esp-idf_release_3.3.1)
-#   SGOS_TARGET       CUE target dir              (default: Controller/v2.1)
+#   SGOS_TARGET       CUE target dir              (default: Controller/v3)
 #   SGOS_CONFIG_JSON  output/input config JSON    (default: config.controller.json)
 #   SGOS_BUILD_DIR    make BUILD_DIR_BASE         (default: ./build; use a native path on WSL for speed)
 #   JOBS              parallel jobs               (default: nproc)
@@ -36,7 +36,7 @@ for arg in "$@"; do
 done
 
 IDF_PATH="${IDF_PATH:-$HOME/esp/esp-idf_release_3.3.1}"
-SGOS_TARGET="${SGOS_TARGET:-Controller/v2.1}"
+SGOS_TARGET="${SGOS_TARGET:-Controller/v3}"
 SGOS_CONFIG_JSON="${SGOS_CONFIG_JSON:-config.controller.json}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 CUE_DIR="config_gen/config/SuperGreenOS/Controllers/$SGOS_TARGET"

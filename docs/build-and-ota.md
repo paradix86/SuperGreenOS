@@ -7,7 +7,7 @@ This document describes the **current validated build flow** and the **OTA packa
 One-shot (runs the whole flow below, verified on WSL Ubuntu 22.04 in 59 s):
 
 ```bash
-scripts/build.sh                 # Controller v2.1: CUE -> JSON -> templates -> UI -> make
+scripts/build.sh                 # Controller v3: CUE -> JSON -> templates -> UI -> make
 scripts/build.sh --gen-only      # generation only (also works on Windows Git Bash)
 scripts/build.sh --skip-config   # reuse the committed config.controller.json (no cue needed)
 SGOS_BUILD_DIR=/root/sgos-build scripts/build.sh   # native build dir when the repo is on /mnt/c
@@ -20,7 +20,7 @@ Manual equivalent:
 
 ```bash
 cd /home/alan/sources/SuperGreenOS
-./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v3 config.controller.json
 bash ./update_templates.sh config.controller.json
 bash ./update_htmlapp.sh config.controller.json
 ```
@@ -43,6 +43,9 @@ made `mqtt.c` fail to link unless `update_config.sh` was run first.
 Profile note: `Controller/v2.1` and `Controller/v3` only differ in defaults
 (`MOTOR_N_MIN` 0 vs 8, `MOTORS_CURVE` 1 vs 0, `OTA_BASEDIR` `/ControllerV2.1` vs `/ControllerV3`,
 and whether `MOTOR_N_FREQUENCY` is an NVS key). Defaults only apply to keys missing from NVS.
+Alan's board is labelled `sgl rev 3.11` and its NVS already holds the v3 values (curve 0, motor
+min 8, 40 kHz), so since 2026-09-06 the default target is `Controller/v3`: after an NVS erase the
+firmware then comes back with the right motor defaults for this hardware.
 
 ## 2. Packaging an OTA artifact
 

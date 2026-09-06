@@ -288,7 +288,7 @@ print_next_steps() {
 Environment bootstrap complete.
 
 Documented build order for this repo is:
-1. ./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
+1. ./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v3 config.controller.json
 2. bash ./update_templates.sh config.controller.json
 3. bash ./update_htmlapp.sh config.controller.json
 4. source ~/esp/esp-idf_release_3.3.1/export.sh
@@ -298,7 +298,7 @@ Documented build order for this repo is:
 Suggested next commands:
 
 cd "${REPO_PATH}"
-./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
+./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v3 config.controller.json
 bash ./update_templates.sh config.controller.json
 bash ./update_htmlapp.sh config.controller.json
 source "${IDF_DIR}/export.sh"
