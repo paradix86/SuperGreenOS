@@ -20,6 +20,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_system.h"
 
 #include "log/log.h"
 #include "kv/kv.h"
@@ -49,6 +50,8 @@ void app_main() {
 
   init_kv();
   set_n_restarts(get_n_restarts()+1);
+  ESP_LOGI(SGO_LOG_EVENT, "@APP Boot reset_reason=%d n_restarts=%d heap_free=%u",
+      (int)esp_reset_reason(), get_n_restarts(), (unsigned int)esp_get_free_heap_size());
 
   preinit_app();
 

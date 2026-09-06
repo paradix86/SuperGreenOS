@@ -22,6 +22,8 @@
 #include <stdlib.h>
 
 #include <esp_http_server.h>
+#include <esp_system.h>
+#include <esp_timer.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -301,6 +303,13 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   int mqtt_connected = get_mqtt_connected() ? 1 : 0;
   int n_restarts = get_n_restarts();
   int ota_status = get_ota_status();
+  // Why the current boot happened (esp_reset_reason_t: 1 power-on, 3 software,
+  // 4 panic, 5/6/7 watchdogs, 9 brownout) plus heap and uptime, so a reboot
+  // loop or a leak can be diagnosed over HTTP without a serial console.
+  int reset_reason = (int)esp_reset_reason();
+  unsigned long heap_free = (unsigned long)esp_get_free_heap_size();
+  unsigned long heap_min_free = (unsigned long)esp_get_minimum_free_heap_size();
+  long uptime_s = (long)(esp_timer_get_time() / 1000000LL);
   char broker_url[MAX_KVALUE_SIZE] = {0};
   char broker_clientid[MAX_KVALUE_SIZE] = {0};
   char ret[1024] = {0};
@@ -311,7 +320,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   snprintf(ret, sizeof(ret),
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
-      "\"ota_status\":%d,\"broker_url\":\"%s\","
+      "\"ota_status\":%d,\"reset_reason\":%d,\"heap_free\":%lu,"
+      "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
       (long)mqtt_disc_idx,
@@ -320,6 +330,10 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       mqtt_connected,
       n_restarts,
       ota_status,
+      reset_reason,
+      heap_free,
+      heap_min_free,
+      uptime_s,
       broker_url,
       broker_clientid);
 
