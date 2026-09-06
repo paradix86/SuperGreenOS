@@ -31,6 +31,8 @@ If any live step becomes unstable or uncertain, stop immediately and use the com
   1. `./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json`
   2. `bash ./update_templates.sh config.controller.json`
   3. `bash ./update_htmlapp.sh config.controller.json`
+- `scripts/build.sh` runs that flow plus `make defconfig && make` (verified 2026-09-06 on WSL Ubuntu 22.04, firmware.bin 1046560 bytes). `setup/setup_supergreenos_build_env.sh` bootstraps the toolchain on Ubuntu/WSL.
+- `config.controller.json` is tracked but generated; keep it in sync with the CUE sources (it was a stale v3 export without `sensor_health` until 2026-09-06).
 - A clean compile was verified only after the generation flow above plus:
 
 ```bash
