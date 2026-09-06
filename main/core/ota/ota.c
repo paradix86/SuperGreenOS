@@ -42,10 +42,12 @@
 #include "esp_wifi.h"
 #include "esp_event_loop.h"
 #include "esp_ota_ops.h"
+#include "esp_timer.h"
 
 #include "../log/log.h"
 #include "../wifi/wifi.h"
 #include "../kv/kv.h"
+#include "mbedtls/sha256.h"
 
 #define BUFFSIZE 1024
 #define TEXT_BUFFSIZE 1024
@@ -53,6 +55,15 @@
 #define OTA_CONNECT_TIMEOUT_S 10
 
 #define OTA_BUILD_TIMESTAMP_BCK "O_B_T_BCK"
+
+#define OTA_SHA256_HEX_LEN 64
+
+// Failed-attempt backoff: a client that retries OTA_START right after a
+// failure (a UI auto-retry, a flaky HA automation) used to be able to hammer
+// the OTA task every second forever. Grows 1min, 2min, 4min... capped at 15min,
+// resets to 0 the moment a request completes without a network/check error.
+#define OTA_BACKOFF_BASE_S 60
+#define OTA_BACKOFF_MAX_S (15 * 60)
 
 static char ota_write_data[BUFFSIZE + 1] = { 0 };
 /*an packet receive buffer*/
@@ -63,6 +74,13 @@ static int binary_file_length = 0;
 static int socket_id = -1;
 
 static QueueHandle_t cmd;
+static int ota_consecutive_failures = 0;
+static int64_t ota_last_attempt_us = 0;
+
+// Accumulates over the firmware.bin body as it streams to flash; only active
+// when the server published a matching firmware.bin.sha256 (see try_ota()).
+static mbedtls_sha256_context ota_sha256_ctx;
+static bool ota_sha256_active = false;
 
 typedef enum {
   OTA_VERSION_CHECK_ERROR = -1,
@@ -117,6 +135,9 @@ static bool read_past_http_header(char text[], int total_len, esp_ota_handle_t u
       } else {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA esp_ota_write header OK");
         binary_file_length += i_write_len;
+        if (ota_sha256_active) {
+          mbedtls_sha256_update_ret(&ota_sha256_ctx, (const unsigned char *)ota_write_data, i_write_len);
+        }
       }
       return true;
     }
@@ -124,6 +145,15 @@ static bool read_past_http_header(char text[], int total_len, esp_ota_handle_t u
     vTaskDelay(1 / portTICK_PERIOD_MS);
   }
   return false;
+}
+
+static void bin2hex(const unsigned char *bin, size_t bin_len, char *hex) {
+  static const char digits[] = "0123456789abcdef";
+  for (size_t i = 0; i < bin_len; ++i) {
+    hex[i * 2] = digits[(bin[i] >> 4) & 0xF];
+    hex[i * 2 + 1] = digits[bin[i] & 0xF];
+  }
+  hex[bin_len * 2] = 0;
 }
 
 static bool connect_to_http_server()
@@ -182,6 +212,75 @@ static bool connect_to_http_server()
     return true;
   }
  return false;
+}
+
+
+// Best-effort: fetches "<basedir>/<ts>/firmware.bin.sha256" (produced by
+// scripts/build_maintenance_ota.sh) and extracts the first 64 hex chars found
+// in the response body. Returns false on any error (missing file, network,
+// bad response) so callers can fall back to an unverified OTA rather than
+// hard-require every possible OTA source to publish this file.
+static bool fetch_expected_sha256(const char *hostname, int16_t port, const char *basedir,
+    const char *new_timestamp, char *out_hex) {
+  if (!connect_to_http_server()) {
+    return false;
+  }
+  if (!set_socket_recv_timeout(socket_id, OTA_RECV_TIMEOUT_S)) {
+    close(socket_id);
+    return false;
+  }
+
+  const char *GET_FORMAT =
+    "GET %s/%s/firmware.bin.sha256 HTTP/1.0\r\n"
+    "Host: %s:%d\r\n"
+    "User-Agent: esp-idf/1.0 esp32\r\n\r\n";
+  char *http_request = NULL;
+  int get_len = asprintf(&http_request, GET_FORMAT, basedir, new_timestamp, hostname, port);
+  if (get_len < 0) {
+    close(socket_id);
+    return false;
+  }
+  int res = send(socket_id, http_request, get_len, 0);
+  free(http_request);
+  if (res < 0) {
+    close(socket_id);
+    return false;
+  }
+
+  // the whole response (status line + headers + a 64-char hex body) is a few
+  // hundred bytes at most; read it all into one buffer.
+  char buf[256] = {0};
+  size_t total = 0;
+  while (total < sizeof(buf) - 1) {
+    int n = recv(socket_id, buf + total, sizeof(buf) - 1 - total, 0);
+    if (n <= 0) break;
+    total += n;
+  }
+  close(socket_id);
+  buf[total] = 0;
+
+  bool has_status_line = strncmp(buf, "HTTP/1.", 7) == 0;
+  bool is_200 = has_status_line && strncmp(buf + 9, "200", 3) == 0;
+  if (!is_200) {
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA No sha256 published for this build (no 200 response)");
+    return false;
+  }
+
+  size_t run = 0, start = 0;
+  for (size_t i = 0; i < total; ++i) {
+    if (isxdigit((unsigned char)buf[i])) {
+      if (run == 0) start = i;
+      if (++run == OTA_SHA256_HEX_LEN) {
+        memcpy(out_hex, buf + start, OTA_SHA256_HEX_LEN);
+        out_hex[OTA_SHA256_HEX_LEN] = 0;
+        return true;
+      }
+    } else {
+      run = 0;
+    }
+  }
+  ESP_LOGI(SGO_LOG_NOSEND, "@OTA No sha256 published for this build (no hex hash in response)");
+  return false;
 }
 
 static ota_version_check_result check_new_version(char *new_timestamp, int len) {
@@ -299,6 +398,16 @@ static void try_ota(const char *new_timestamp)
   int16_t port = get_ota_server_port();
   char basedir[128] = {0}; get_ota_basedir(basedir, 128);
 
+  char expected_sha256[OTA_SHA256_HEX_LEN + 1] = {0};
+  ota_sha256_active = fetch_expected_sha256(hostname, port, basedir, new_timestamp, expected_sha256);
+  if (ota_sha256_active) {
+    mbedtls_sha256_init(&ota_sha256_ctx);
+    mbedtls_sha256_starts_ret(&ota_sha256_ctx, false);
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA Verifying against published sha256 %s", expected_sha256);
+  } else {
+    ESP_LOGW(SGO_LOG_NOSEND, "@OTA Proceeding without firmware integrity check");
+  }
+
   esp_err_t err;
   /* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
   esp_ota_handle_t update_handle = 0 ;
@@ -410,6 +519,9 @@ static void try_ota(const char *new_timestamp)
         close(socket_id);
         return;
       }
+      if (ota_sha256_active) {
+        mbedtls_sha256_update_ret(&ota_sha256_ctx, (const unsigned char *)ota_write_data, buff_len);
+      }
       binary_file_length += buff_len;
       ESP_LOGI(SGO_LOG_NOSEND, "@OTA Have written image length %d", binary_file_length);
     } else if (buff_len == 0) {  /*packet over*/
@@ -423,6 +535,21 @@ static void try_ota(const char *new_timestamp)
   }
 
   ESP_LOGI(SGO_LOG_NOSEND, "@OTA Total Write binary data length : %d", binary_file_length);
+
+  if (ota_sha256_active) {
+    unsigned char hash_bin[32];
+    mbedtls_sha256_finish_ret(&ota_sha256_ctx, hash_bin);
+    char hash_hex[OTA_SHA256_HEX_LEN + 1] = {0};
+    bin2hex(hash_bin, sizeof(hash_bin), hash_hex);
+    ota_sha256_active = false;
+    if (strncmp(hash_hex, expected_sha256, OTA_SHA256_HEX_LEN) != 0) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@OTA sha256 mismatch: downloaded %s expected %s, aborting", hash_hex, expected_sha256);
+      esp_ota_end(update_handle);
+      close(socket_id);
+      return;
+    }
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA sha256 verified: %s", hash_hex);
+  }
 
   if (esp_ota_end(update_handle) != ESP_OK) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA esp_ota_end failed!");
@@ -470,6 +597,7 @@ static void ota_task(void *pvParameter) {
     ESP_LOGI(SGO_LOG_NOSEND, "@OTA Waiting for OTA command");
     while(!xQueueReceive(cmd, &c, portMAX_DELAY));
     ESP_LOGI(SGO_LOG_NOSEND, "@OTA Dequeued OTA command c=%u", (unsigned int)c);
+    ota_last_attempt_us = esp_timer_get_time();
 
     int ota_build_timestamp = get_ota_timestamp();
     if (ota_build_timestamp == 0) {
@@ -487,12 +615,15 @@ static void ota_task(void *pvParameter) {
         // try_ota() only returns when the update did not complete: on success it restarts.
         ESP_LOGE(SGO_LOG_NOSEND, "@OTA Update failed, see previous errors");
         set_ota_status(OTA_STATUS_FAILED);
+        ++ota_consecutive_failures;
       } else if (check_result == OTA_VERSION_CHECK_UP_TO_DATE) {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA Firmware is up-to-date");
         set_ota_status(OTA_STATUS_IDLE);
+        ota_consecutive_failures = 0;
       } else {
         ESP_LOGE(SGO_LOG_NOSEND, "@OTA Firmware check failed (network/response error)");
         set_ota_status(OTA_STATUS_FAILED);
+        ++ota_consecutive_failures;
       }
     }
 
@@ -546,6 +677,23 @@ int request_ota_start(int value) {
   if (cmd == NULL) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA request_ota_start queue is NULL");
     return 0;
+  }
+
+  if (ota_consecutive_failures > 0) {
+    int64_t backoff_us = (int64_t)OTA_BACKOFF_BASE_S * 1000000LL;
+    for (int i = 1; i < ota_consecutive_failures && backoff_us < (int64_t)OTA_BACKOFF_MAX_S * 1000000LL; ++i) {
+      backoff_us *= 2;
+    }
+    if (backoff_us > (int64_t)OTA_BACKOFF_MAX_S * 1000000LL) {
+      backoff_us = (int64_t)OTA_BACKOFF_MAX_S * 1000000LL;
+    }
+    int64_t elapsed_us = esp_timer_get_time() - ota_last_attempt_us;
+    if (elapsed_us < backoff_us) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@OTA request_ota_start rejected, backing off after %d consecutive failures (%lld s remaining)",
+          ota_consecutive_failures, (long long)((backoff_us - elapsed_us) / 1000000LL));
+      set_ota_status(OTA_STATUS_FAILED);
+      return 0;
+    }
   }
 
   if (ota_request_pending) {
