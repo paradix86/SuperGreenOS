@@ -74,6 +74,12 @@ Planned hardening direction:
 - HTTP/KV and MQTT OTA trigger paths must both use the same dispatch semantics
 - failed dispatch must not leave a false-positive `OTA_START=1`
 
+Implemented on this branch (build-verified, not yet hardware-tested):
+
+- `OTA_START` is released to `0` by `ota_task` once the request is handled; read `OTA_STATUS` for the outcome (`0` idle/up-to-date, `1` in progress, `2` disabled, `3` failed)
+- a new `OTA_START=1` while a previous request is still queued or running is logged and ignored (`OTA_START` stays `1`), so a double click or a Home Assistant retry cannot queue a second update
+- `/mqttdiag` reports `mqtt_connected` and `ota_status`
+
 ## Frozen runbooks
 
 ### 1. OTA-delivery-only runbook
