@@ -260,7 +260,7 @@ This flow was later reused to deploy the first working `sensor_health` backend t
 
 ## Maintenance build caveat
 
-`scripts/build_maintenance_ota.sh` enables a one-time SPIFFS format. This means the controller may boot the new firmware successfully but lose `/fs/app.html` until the web UI is uploaded again.
+`scripts/build_maintenance_ota.sh` enables a one-time SPIFFS format by default. This means the controller may boot the new firmware successfully but lose `/fs/app.html` until the web UI is uploaded again. For a firmware-only update run it with `SGOS_SPIFFS_FORMAT_ONCE=0` (see `docs/build-and-ota.md` for all options).
 
 If `/fs/app.html` returns `This URI does not exist` after maintenance OTA, restore the UI with:
 

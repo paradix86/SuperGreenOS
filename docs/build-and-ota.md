@@ -1,6 +1,6 @@
 # Build and OTA
 
-This document describes the **current validated build flow** and the **practical maintenance packaging workaround**.
+This document describes the **current validated build flow** and the **OTA packaging flow**.
 
 ## 1. Required generation/build flow
 
@@ -44,58 +44,39 @@ Profile note: `Controller/v2.1` and `Controller/v3` only differ in defaults
 (`MOTOR_N_MIN` 0 vs 8, `MOTORS_CURVE` 1 vs 0, `OTA_BASEDIR` `/ControllerV2.1` vs `/ControllerV3`,
 and whether `MOTOR_N_FREQUENCY` is an NVS key). Defaults only apply to keys missing from NVS.
 
-## 2. Maintenance packaging reality
+## 2. Packaging an OTA artifact
 
-`scripts/build_maintenance_ota.sh` currently mutates tracked files during packaging, notably:
+`scripts/build_maintenance_ota.sh` packages `releases/<basedir>/<TS>/firmware.bin`,
+`last_timestamp`, `firmware.bin.sha256` and `git_commit.txt` from the current commit.
+It requires a clean worktree and up-to-date generated sources (run `scripts/build.sh`
+first), patches `OTA_BUILD_TIMESTAMP` (and optionally the one-time SPIFFS format flag)
+in two tracked sources for the duration of the build, and restores them with
+`git checkout` on exit. The firmware version string therefore reads `<commit>-dirty`;
+`git_commit.txt` records the real baseline.
 
-- `main/core/httpd/httpd_fs.c`
-- `main/core/ota/ota.h`
+Environment knobs:
 
-As a result, the packaged firmware metadata appears as `<commit>-dirty` during packaging.
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `SGOS_SPIFFS_FORMAT_ONCE` | `1` | `1`: maintenance build, formats SPIFFS once at boot (web UI must be re-uploaded). `0`: plain firmware update, SPIFFS untouched. |
+| `SGOS_OTA_BASEDIR` | `SuperGreenMaintenance` | directory under `releases/`, must match the controller's `OTA_BASEDIR` |
+| `SGOS_BUILD_DIR` | `./build` | `make BUILD_DIR_BASE`; use a native path on WSL (`/root/sgos-build`) |
+| `JOBS` | `nproc` | parallel jobs |
 
-For the validated maintenance candidate flow, the practical provenance is:
-
-- code baseline: target commit (for example `0b1eda8`)
-- packaged firmware metadata: `<commit>-dirty`
-
-## 3. Practical packaging workaround
-
-Use a temporary detached worktree at the exact target commit.
+Verified on WSL (2026-09-06, 24 s with a warm build dir):
 
 ```bash
-ROOT=/home/alan/sources/SuperGreenOS
-BASE=0b1eda8
-WT=/tmp/SuperGreenOS-ota-pack-$(date +%s)
-
-git -C "$ROOT" worktree add --detach "$WT" "$BASE"
-cd "$WT"
-
-./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json
-bash ./update_templates.sh config.controller.json
-bash ./update_htmlapp.sh config.controller.json
-
-source ~/esp/esp-idf_release_3.3.1/export.sh
-make defconfig
-
-git update-index --assume-unchanged   config.controller.json   main/core/mqtt/mqtt.h   sdkconfig   spiffs_fs/app.html   spiffs_fs/config.json
-
-bash ./scripts/build_maintenance_ota.sh
-
-TS=$(cat releases/SuperGreenMaintenance/last_timestamp)
-BIN="releases/SuperGreenMaintenance/$TS/firmware.bin"
-sha256sum "$BIN" | tee /tmp/maintenance_${TS}.sha256
-
-mkdir -p "$ROOT/releases/SuperGreenMaintenance/$TS"
-cp "$BIN" "$ROOT/releases/SuperGreenMaintenance/$TS/firmware.bin"
-echo "$TS" > "$ROOT/releases/SuperGreenMaintenance/last_timestamp"
-cp /tmp/maintenance_${TS}.sha256 "$ROOT/releases/SuperGreenMaintenance/$TS/firmware.bin.sha256"
-
-git update-index --no-assume-unchanged   config.controller.json   main/core/mqtt/mqtt.h   sdkconfig   spiffs_fs/app.html   spiffs_fs/config.json
-
-cd "$ROOT"
-git worktree remove --force "$WT"
-git worktree prune
+export IDF_PATH=~/esp/esp-idf_release_3.3.1
+. "$IDF_PATH/export.sh"
+SGOS_BUILD_DIR=/root/sgos-build SGOS_SPIFFS_FORMAT_ONCE=0 JOBS=16 bash scripts/build_maintenance_ota.sh
 ```
+
+## 3. Choosing the SPIFFS flag
+
+Use `SGOS_SPIFFS_FORMAT_ONCE=0` for firmware-only validation: the controller keeps
+`app.html`/`config.json` and comes back with its UI. Use the default `1` only when the
+SPIFFS partition itself must be recreated (corrupted filesystem, failed uploads after
+OTA); afterwards restore the UI with `update_htmlapp.sh` + `upload_htmlapp.sh`.
 
 ## 4. Packaging outputs that must exist before OTA
 
