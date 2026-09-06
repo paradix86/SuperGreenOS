@@ -74,8 +74,11 @@ static int binary_file_length = 0;
 static int socket_id = -1;
 
 static QueueHandle_t cmd;
-static int ota_consecutive_failures = 0;
-static int64_t ota_last_attempt_us = 0;
+// written by ota_task(), read by request_ota_start() from a different
+// calling context (HTTP/KV or MQTT command dispatch): volatile for the same
+// reason as ota_request_pending below, not because of any observed bug.
+static volatile int ota_consecutive_failures = 0;
+static volatile int64_t ota_last_attempt_us = 0;
 
 // Accumulates over the firmware.bin body as it streams to flash; only active
 // when the server published a matching firmware.bin.sha256 (see try_ota()).
