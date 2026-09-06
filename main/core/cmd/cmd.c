@@ -34,7 +34,10 @@ static QueueHandle_t cmd;
 static char buf_cmd[MAX_CMD_LENGTH] = {0};
 
 void execute_cmd(int length, const char *cmdData, bool remote) {
-  if (length > MAX_CMD_LENGTH-1) {
+  // " -r 1"/" -r 0" (5 bytes) plus the NUL terminator are appended after
+  // cmdData below, into a cmdStr[MAX_CMD_LENGTH] buffer: length must leave
+  // room for both, not just the terminator.
+  if (length > MAX_CMD_LENGTH - 6) {
     ESP_LOGE(SGO_LOG_NOSEND, "@CMD Sending command failed, too long.");
   } else {
     char cmdStr[MAX_CMD_LENGTH] = {0};
