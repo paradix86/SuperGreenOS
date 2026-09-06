@@ -13,6 +13,8 @@ import argparse
 import json
 import mimetypes
 import pathlib
+import random
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -42,7 +44,61 @@ def build_mock_values(config: dict) -> tuple[dict[str, str], dict[str, str]]:
   int_values["OTA_TIMESTAMP"] = "20260303"
   str_values["WIFI_IP"] = "192.168.1.57"
 
+  # A plausible grow box so the dashboard tab has something to show
+  # (values mirror the units of the real controller: VPD is kPa * 100).
+  now = int(time.time())
+  int_values.update({
+    "TIME": str(now),
+    "BOX_0_ENABLED": "1",
+    "BOX_0_TEMP": "24",
+    "BOX_0_HUMI": "58",
+    "BOX_0_VPD": "116",
+    "BOX_0_CO2": "0",
+    "BOX_0_TIMER_TYPE": "1",
+    "BOX_0_TIMER_OUTPUT": "100",
+    "BOX_0_ON_HOUR": "8",
+    "BOX_0_OFF_HOUR": "19",
+    "BOX_0_LED_DIM": "80",
+    "BOX_0_FAN_DUTY": "45",
+    "BOX_0_FAN_REF_SOURCE": "8",
+    "BOX_0_BLOWER_DUTY": "30",
+    "BOX_0_BLOWER_REF_SOURCE": "1",
+    "BOX_0_WATERING_POWER": "20",
+    "BOX_0_WATERING_LEFT": "-1",
+    "BOX_0_WATERING_PERIOD": "2880",
+    "BOX_0_WATERING_DURATION": "20",
+    "BOX_0_WATERING_LAST": str(now - 3600),
+    "BOX_0_STARTED_AT": str(now - 12 * 86400),
+    "BOX_0_DURATION_DAYS": "215",
+    "LED_0_BOX": "0",
+    "LED_0_DUTY": "80",
+    "LED_0_DIM": "100",
+    "LED_1_BOX": "0",
+    "LED_1_DUTY": "80",
+    "LED_1_DIM": "100",
+    "SENSOR_HEALTH_ENABLED": "1",
+    "SENSOR_HEALTH_PERIOD_S": "60",
+    "SENSOR_HEALTH_WARMUP_SAMPLES": "3",
+    "SENSOR_HEALTH_STUCK_SAMPLES": "5",
+    "SENSOR_HEALTH_STATUS": "3",
+  })
+  str_values["SENSOR_HEALTH_LAST_ALERT"] = "box_0_temp_stuck"
+
   return int_values, str_values
+
+
+START_TIME = int(time.time())
+
+
+def build_mock_diag(int_values: dict[str, str]) -> dict:
+  return {
+    "mqtt_stage": 6, "mqtt_disc_idx": 23, "state": 2, "wifi_status": 3, "mqtt_connected": 1,
+    "n_restarts": 145, "ota_status": 0, "reset_reason": 3, "reset_history": "3,1",
+    "heap_free": 40768, "heap_min_free": 2908, "heap_min_free_at": 31, "heap_low_events": 1,
+    "uptime_s": int(time.time()) - START_TIME, "nvs_used": 293, "nvs_free": 211,
+    "mqtt_stack_hwm": 6852, "time_valid": 1,
+    "broker_url": "mqtt://sink2.supergreenlab.com:1883", "broker_clientid": "mock",
+  }
 
 
 class MockHandler(BaseHTTPRequestHandler):
@@ -81,9 +137,17 @@ class MockHandler(BaseHTTPRequestHandler):
       self._send(200, self.config_raw, "application/json")
       return
 
+    if path == "/mqttdiag":
+      self._send_text(200, json.dumps(build_mock_diag(self.int_values)), "application/json")
+      return
+
     if path == "/i":
       key = params.get("k", [""])[0]
-      self._send_text(200, self.int_values.get(key, "0"))
+      value = self.int_values.get(key, "0")
+      # a little jitter so the dashboard sparklines have something to draw
+      if key in ("BOX_0_TEMP", "BOX_0_HUMI", "BOX_0_VPD"):
+        value = str(int(value) + random.choice((-1, 0, 0, 1)))
+      self._send_text(200, value)
       return
 
     if path == "/s":
@@ -95,6 +159,17 @@ class MockHandler(BaseHTTPRequestHandler):
 
   def do_POST(self) -> None:
     parsed = urllib.parse.urlparse(self.path)
+    params = urllib.parse.parse_qs(parsed.query)
+    key = params.get("k", [""])[0]
+    value = params.get("v", [""])[0]
+    if parsed.path == "/i" and key:
+      self.int_values[key] = str(int(value)) if value.lstrip("-").isdigit() else "0"
+      self._send_text(200, "OK")
+      return
+    if parsed.path == "/s" and key:
+      self.str_values[key] = value
+      self._send_text(200, "OK")
+      return
     if parsed.path in ("/i", "/s", "/signing"):
       self._send_text(200, "OK")
       return

@@ -1,0 +1,259 @@
+.dash {
+  padding: 10pt;
+  background-color: #f7f7f7;
+}
+
+.dash_toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10pt;
+  margin-bottom: 8pt;
+  font-size: 0.9em;
+}
+
+.dash_toolbar > button, .dash_form > button {
+  border: 1pt solid #cfcfcf;
+  background-color: #ffffff;
+  color: #5a5a5a;
+  border-radius: 4pt;
+  padding: 4pt 8pt;
+  cursor: pointer;
+}
+
+.dash_grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: 8pt;
+  align-items: start;
+}
+
+.dash_boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8pt;
+}
+
+.dash_leds {
+  margin-top: 8pt;
+}
+
+/* grid/flex children default to min-width:auto and would push the cards
+   wider than a phone screen instead of wrapping */
+.dash_grid > *, .dash_boxes > *, .dash_row > *, .dash_bar > * {
+  min-width: 0;
+}
+
+.dash_card {
+  background-color: #ffffff;
+  border: 1pt solid #e4e4e4;
+  border-radius: 6pt;
+  padding: 10pt;
+  overflow: hidden;
+}
+
+.dash_card.disabled {
+  opacity: 0.6;
+}
+
+.dash_card_title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6pt;
+  margin-bottom: 8pt;
+}
+
+.dash_card_title > h3 {
+  margin: 0;
+  font-size: 1.05em;
+  color: #4a4a4a;
+}
+
+.dash_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt;
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2pt 8pt;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: #666;
+  background-color: #efefef;
+  white-space: nowrap;
+}
+
+.chip.ok { color: #0f6b2b; background-color: #e7f7ec; }
+.chip.warn { color: #8a5a00; background-color: #fff6e6; }
+.chip.bad { color: #9a1c1c; background-color: #ffecec; }
+.chip.day { color: #7a5200; background-color: #fff3c4; }
+.chip.night { color: #ffffff; background-color: #3b4a6b; }
+
+.dash_row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8pt;
+  padding: 3pt 0;
+  border-bottom: 1pt solid #f2f2f2;
+  font-size: 0.9em;
+}
+
+.dash_row > strong {
+  color: #4a4a4a;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.dash_readings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6pt 14pt;
+  margin: 4pt 0 8pt 0;
+}
+
+.dash_readings > div > b {
+  font-size: 1.8em;
+  color: #333;
+}
+
+.dash_readings > div > span {
+  margin-left: 3pt;
+  font-size: 0.8em;
+  color: #888;
+}
+
+.dash_sparks {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6pt;
+  margin-bottom: 8pt;
+}
+
+.dash_sparks > div > span {
+  display: block;
+  font-size: 0.75em;
+  color: #888;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  height: 28px;
+  fill: none;
+  stroke: #3d8f4e;
+  stroke-width: 1.5;
+}
+
+.spark polyline {
+  vector-effect: non-scaling-stroke;
+}
+
+.spark_range {
+  font-size: 0.7em;
+  color: #999;
+}
+
+.dash_bar {
+  display: grid;
+  grid-template-columns: 52px 1fr 44px;
+  align-items: center;
+  gap: 6pt;
+  padding: 2pt 0;
+  font-size: 0.9em;
+}
+
+.dash_bar > i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background-color: #eeeeee;
+  overflow: hidden;
+}
+
+.dash_bar > i > b {
+  display: block;
+  height: 100%;
+  background-color: #6cbf7a;
+}
+
+.dash_bar > strong {
+  text-align: right;
+  color: #4a4a4a;
+}
+
+.dash_table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.dash_table th, .dash_table td {
+  text-align: left;
+  padding: 4pt 4pt;
+  border-bottom: 1pt solid #f0f0f0;
+}
+
+.dash_form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6pt 10pt;
+  margin-top: 10pt;
+  padding-top: 8pt;
+  border-top: 1pt solid #ececec;
+  font-size: 0.85em;
+}
+
+.dash_form_title, .dash_form > button {
+  grid-column: 1 / -1;
+}
+
+.dash_form_title {
+  font-weight: 700;
+  color: #565656;
+}
+
+.dash_form > label {
+  display: flex;
+  flex-direction: column;
+  color: #666;
+}
+
+.dash_form > label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 6pt;
+}
+
+.dash_form input[type=number] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dash_note {
+  margin: 4pt 0;
+  padding: 4pt 6pt;
+  border-radius: 4pt;
+  font-size: 0.85em;
+}
+
+.dash_note.warn { color: #8a5a00; background-color: #fff6e6; }
+.dash_small { font-size: 0.85em; overflow-wrap: anywhere; }
+.dash_muted { color: #8a8a8a; }
+
+.dashboard > .menu_item_dashboard {
+  border-bottom: 2pt solid #454545;
+}
+
+.menu_item_dashboard {
+  cursor: pointer;
+  padding: 10pt 10pt;
+}
+
+@media only screen and (max-width: 800px) {
+  .dash_grid { grid-template-columns: 1fr; }
+}

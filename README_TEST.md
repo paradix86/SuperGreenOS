@@ -17,10 +17,10 @@ It does **not** flash firmware partitions (`ota_0`, `ota_1`).
 - Git Bash installed (`C:\Program Files\Git\bin\bash.exe`)
 - Node.js installed
 - Python 3 installed
-- `ejs-cli` installed globally:
+- `ejs-cli` and `terser` installed globally (terser minifies the JS so `app.html` fits the 32 KB SPIFFS next to `config.json`):
 
 ```powershell
-npm install -g ejs-cli
+npm install -g ejs-cli terser
 ```
 
 ## 1. Regenerate Embedded UI Files
@@ -52,8 +52,9 @@ Open:
 Expected:
 
 - Header values visible (`Firmware`, `Build`, `Wi-Fi`, `IP`)
+- `Dashboard` tab shows the Controller card (Wi-Fi/MQTT chips, heap, sensor health `box_0_temp_stuck`), a `Box 1` card with 24 °C / 58 % / 1.16 kPa and sparklines after a minute, and the LEDs table
 - Global error banner works with `Retry` if server is stopped
-- `Save` / `Refresh` buttons visible on writable fields
+- `Save` / `Refresh` buttons visible on writable fields in the controller tab
 
 ## 3. Find Real Controller IP (LAN)
 

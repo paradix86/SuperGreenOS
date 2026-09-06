@@ -1,6 +1,6 @@
 # Backend Roadmap
 
-The recovered UI contains several automation-oriented panels that currently deserve real backend support.
+The recovered UI contained several automation-oriented panels that deserve real backend support. The browser-side versions of `Dynamic Climate Setpoint`, `Energy Optimization` and `History & KPI` were removed from the web UI on 2026-09-06 (they wrote wrong values or only worked while a tab was open, see `docs/ui-customization.md`); if these features come back they belong in firmware modules, not in the page.
 
 ## Recommended implementation order
 
@@ -26,7 +26,7 @@ What already exists:
   - `sensor_health_stuck_samples`
   - `sensor_health_status`
   - `sensor_health_last_alert`
-- compact read-only UI bridge in `html_app/sensor-health.custom.js`
+- status, last alert and the four settings on the web UI Dashboard tab (`html_app/dashboard.js`)
 
 Verified live device state included:
 

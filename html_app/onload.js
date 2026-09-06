@@ -618,7 +618,11 @@ function renderTopMenuItem(id, title, onSelect) {
 
 function renderTopMenu(onSelect) {
   const body = document.createElement('div')
-  body.setAttribute('class', 'menu modules')
+  body.setAttribute('class', 'menu dashboard')
+  body.appendChild(renderTopMenuItem('dashboard', 'Dashboard', () => {
+    body.setAttribute('class', 'menu dashboard')
+    onSelect('dashboard')
+  }))
   body.appendChild(renderTopMenuItem('modules', config.name, () => {
     body.setAttribute('class', 'menu modules')
     onSelect('modules')
@@ -631,6 +635,7 @@ function renderTopMenu(onSelect) {
 }
 
 async function start() {
+  stopDashboard()
   config = await fetchConfig()
   modules = config.keys.reduce((acc, k) => {
     const d = acc[k.core ? 'system' : 'modules']
@@ -655,13 +660,14 @@ async function start() {
   while (root.firstChild) root.removeChild(root.firstChild)
 
   const menu = renderTopMenu((s) => {
+    stopDashboard()
     while (params.firstChild) params.removeChild(params.firstChild)
-    params.appendChild(renderParams(modules[s]))
+    params.appendChild(s == 'dashboard' ? renderDashboard() : renderParams(modules[s]))
   })
   root.appendChild(menu)
 
   const params = document.createElement('div')
-  params.appendChild(renderParams(modules.modules))
+  params.appendChild(renderDashboard())
   root.appendChild(params)
 }
 

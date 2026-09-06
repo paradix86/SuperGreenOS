@@ -39,13 +39,29 @@ DATA_ABS="$(cd "$(dirname "$DATA")" && pwd)/$(basename "$DATA")"
 OUT_DIR="$ROOT/spiffs_fs"
 mkdir -p "$OUT_DIR"
 
+# html_app/ holds readable sources; the *.js files are minified with terser
+# (npm install -g terser) into a scratch copy before rendering, because the
+# gzip size decides whether app.html still fits next to config.json on the
+# 32 KB SPIFFS partition. SGOS_HTML_MINIFY=0 renders the sources verbatim.
+SRC_DIR="$ROOT/html_app"
+if [ "${SGOS_HTML_MINIFY:-1}" != "0" ] && command -v terser >/dev/null 2>&1; then
+  SRC_DIR="$(mktemp -d)"
+  trap 'rm -rf "$SRC_DIR"' EXIT
+  cp "$ROOT"/html_app/* "$SRC_DIR/"
+  for js in "$SRC_DIR"/*.js; do
+    terser "$js" --compress --mangle --output "$js.min" && mv -f "$js.min" "$js"
+  done
+elif [ "${SGOS_HTML_MINIFY:-1}" != "0" ]; then
+  echo "WARNING: terser not found, app.html will embed unminified JS (npm install -g terser)" >&2
+fi
+
 render() {
   local template="$1"
   local out="$2"
   local tmp
   tmp="$(mktemp "${out}.tmp.XXXXXX")"
   # ejs include() paths are resolved relative to the current directory.
-  if (cd "$ROOT/html_app" && ejs-cli -O "$DATA_ABS" -f "$template") > "$tmp" && [ -s "$tmp" ]; then
+  if (cd "$SRC_DIR" && ejs-cli -O "$DATA_ABS" -f "$template") > "$tmp" && [ -s "$tmp" ]; then
     mv -f "$tmp" "$out"
   else
     rm -f "$tmp"

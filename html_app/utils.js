@@ -1,6 +1,9 @@
-const URL = 'http://192.168.1.11'
+const DEBUG_URL = 'http://192.168.1.11'
 const DEBUG = false
 const REQUEST_RETRIES = 3
+// Requests in flight at once. Each open socket costs the ESP32 ~3-4 KB of
+// heap (4 concurrent GETs measured a 17 KB dip), so keep this low.
+const MAX_IN_FLIGHT = 2
 
 const globalStatus = {
   root: null,
@@ -110,7 +113,7 @@ const schedule_promise = (n, retries) => {
     return p
   }
 }
-const fetchQueue = schedule_promise(3, REQUEST_RETRIES)
+const fetchQueue = schedule_promise(MAX_IN_FLIGHT, REQUEST_RETRIES)
 
 function queueRequest(label, req_func, options) {
   const opts = options || {}
@@ -175,10 +178,32 @@ const fetchConfig = async function() {
   }))
 }
 
+// GET a JSON document from the controller (e.g. /mqttdiag)
+const fetchJson = async function(path, options) {
+  return queueRequest(`Loading ${path}`, () => new Promise(function(resolve, reject) {
+    const r = new XMLHttpRequest()
+    r.open('GET', `${DEBUG ? DEBUG_URL : ''}${path}`, true)
+    r.onreadystatechange = function () {
+      if (r.readyState != 4) return
+      if (r.status != 200) {
+        reject(toHttpError(r.status, r.responseText, 'fetchJson'))
+        return
+      }
+      try {
+        resolve(JSON.parse(r.responseText))
+      } catch (e) {
+        reject(toHttpError(r.status, 'invalid json', 'fetchJson'))
+      }
+    }
+    r.onerror = () => reject(toHttpError(0, 'xhr error', 'fetchJson'))
+    r.send()
+  }), options)
+}
+
 const fetchParam = async function(type, paramName, options) {
   return queueRequest(`Loading ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
-    r.open('GET', `${DEBUG ? URL : ''}/${type}?k=${paramName}`, true)
+    r.open('GET', `${DEBUG ? DEBUG_URL : ''}/${type}?k=${paramName}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {
@@ -200,7 +225,7 @@ const updateParam = async function(type, paramName, value, options) {
   const opts = Object.assign({ allowGlobalRetry: false }, options || {})
   return queueRequest(`Updating ${paramName}`, () => new Promise(function(resolve, reject) {
     const r = new XMLHttpRequest()
-    r.open('POST', `${DEBUG ? URL : ''}/${type}?k=${paramName}&v=${encodeURIComponent(value)}`, true)
+    r.open('POST', `${DEBUG ? DEBUG_URL : ''}/${type}?k=${paramName}&v=${encodeURIComponent(value)}`, true)
     r.onreadystatechange = function () {
       if (r.readyState != 4) return
       if (r.status != 200) {

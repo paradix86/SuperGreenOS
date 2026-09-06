@@ -4,13 +4,38 @@ This project has two different UI layers that are easy to confuse.
 
 ## Source of truth
 
-Edit UI source here:
+Edit UI source here (all readable, no minified blobs are checked in):
 
-- `html_app/index.html`
-- `html_app/onload.custom.js`
-- `html_app/style.custom.css`
+- `html_app/index.html` — EJS shell, includes the CSS and JS below
+- `html_app/utils.js` — request queue (max 2 requests in flight), `fetchConfig`/`fetchParam`/`updateParam`/`fetchJson`, global status banner
+- `html_app/onload.js` — header, connection badge, config export/import, the generated parameter forms, the top tabs
+- `html_app/dashboard.js` — the Dashboard tab (see below)
+- `html_app/style.css`, `html_app/dashboard.css`, `html_app/normalize.min.css`
 
 Do not treat `spiffs_fs/app.html` as the long-term source of truth.
+
+## Dashboard tab (2026-09-06)
+
+The default tab is a read-only overview built from one `GET /mqttdiag` plus the `/i` and `/s` keys of the enabled boxes:
+
+- **Controller** card: Wi-Fi / MQTT / clock / OTA chips, uptime, free heap and heap minimum (`heap_min_free_at`, `heap_low_events` when the firmware reports them), restarts, last reset reason, broker, firmware `sensor_health_status` / `sensor_health_last_alert`
+- **Sensor health (firmware)** form: the four `sensor_health_*` settings with an explicit Save (only changed keys are written)
+- one card per enabled box (tick "show disabled boxes" for the others): temperature, RH, VPD (`box_N_vpd` is kPa × 100 and is shown in kPa), CO₂ when a sensor reports it, day/night from `timer_output`, timer type and on/off schedule, LED/fan/blower bars with the `*_ref_source` helper text, watering summary (`watering_period`/`watering_duration` are seconds), season day
+- **LEDs** table: channel → box, duty, dim
+- 3-hour sparklines for temperature, RH and VPD, sampled every 30 s **while the page is open** and kept in this browser's `localStorage` (`supergreen.dashboard.v1`); the controller has no history storage
+
+Polling: one refresh every 30 s (~35 requests for one enabled box), slow-changing keys (schedule, watering config, ref sources, LED→box mapping) every 5 min.
+
+## Removed: browser-side "Automation & Insights"
+
+The recovered UI carried an `Automation & Insights` panel (Sensor Health, Energy Optimization, Dynamic Climate Setpoint, History & KPI) implemented in the minified `onload.custom.js`. It was removed on 2026-09-06 because it was unreliable and, in two cases, harmful:
+
+- *Dynamic Climate Setpoint* wrote `box_N_fan_ref_min/max` and `blower_ref_min/max` as "target ± tolerance" without looking at `*_ref_source`; on a box whose fan follows the timer output (source 8) that breaks the fan, and its VPD numbers were 100× off (firmware VPD is kPa × 100)
+- *Energy Optimization* only ever lowered `led_dim`/`fan_max`/`blower_max` to the current cap and never raised them back: after one night the LED stayed at the night cap
+- the browser-side *Sensor Health* shared its inputs with the firmware bridge (`sensor-health.custom.js`), which relabelled them; saving from one corrupted the other's settings and both fought over the same summary element
+- *History & KPI* only existed while a tab was open, so 24 h / 7 d figures were mostly empty
+
+The firmware-side sensor health (`main/sensor_health/`) stays and is what the Dashboard shows.
 
 ## Generated output
 
@@ -41,22 +66,16 @@ Recovered and preserved in the repo:
 - retry banner
 - connection badge
 - config export/import
-- `Automation & Insights`
-- `Sensor Health`
-- `Energy Optimization`
-- `Dynamic Climate Setpoint`
-- `History & KPI`
+
+(the `Automation & Insights` panel was recovered too, then replaced by the Dashboard tab — see above)
 
 ## Legacy SPIFFS size budget matters
 
-The controller SPIFFS partition is only `32 KB`, so UI size is part of the design.
+The controller SPIFFS partition is only `32 KB` (about 24 KB usable once SPIFFS keeps its two spare blocks), shared by `app.html` and `config.json`, so UI size is part of the design. `update_htmlapp.sh` prints the gzip sizes; as of 2026-09-06 they are ~12.6 KB + ~6.3 KB.
 
-Important discovery:
+`update_htmlapp.sh` minifies the JS with `terser` (`npm install -g terser`) before rendering; without it the page still renders but gzips ~2.4 KB larger, which is most of the remaining margin. `SGOS_HTML_MINIFY=0` skips minification for debugging.
 
-- `html_app/style.custom.css` accidentally contained a full second copy of `normalize.css`
-- `html_app/index.html` already included `normalize.min.css`
-
-Removing that duplication was required to make the compressed app fit again.
+Earlier discovery: `style.custom.css` once contained a full second copy of `normalize.css` next to `normalize.min.css`; removing that duplication was required to make the compressed app fit.
 
 ## Uploading the UI
 
@@ -75,20 +94,9 @@ Current behavior:
 
 This is not an optimization gimmick here; it directly affects whether the UI fits the controller.
 
-## Current sensor health UI bridge
+## Local testing
 
-The live UI includes a very small read-only debug bridge:
-
-- `html_app/sensor-health.custom.js`
-
-It updates `sensor_health_summary` by polling:
-
-- `sensor_health_status`
-- `sensor_health_last_alert`
-- `sensor_health_period_s`
-- `sensor_health_stuck_samples`
-
-It is intentionally tiny so it stays deployable on the legacy SPIFFS layout.
+`python mock_server.py --port 8080 --root spiffs_fs` serves the rendered UI with a fake box, `/mqttdiag` and writable `/i`/`/s` keys, so the Dashboard can be checked at `http://127.0.0.1:8080/app.html` without touching the controller (see `README_TEST.md`).
 
 ## Browser cache gotcha
 
