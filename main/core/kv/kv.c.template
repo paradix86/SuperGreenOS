@@ -337,7 +337,7 @@ void getstr(const char * key, char *value, size_t length) {
     ESP_LOGW(SGO_LOG_NOSEND, "@KV %s not found, returning empty string", key);
     return;
   }
-  ESP_ERROR_CHECK(err);
+  ESP_LOGE(SGO_LOG_NOSEND, "@KV nvs_get_str %s failed: 0x%x, returning empty string", key, err);
 }
 
 void setstr(const char * key, const char * value) {
