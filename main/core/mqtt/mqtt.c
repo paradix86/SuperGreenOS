@@ -55,7 +55,7 @@ static esp_mqtt_client_handle_t client;
 static QueueHandle_t cmd;
 
 static int CMD_MQTT_CONNECTED = 1;
-static int CMD_MQTT_PUBLISH_STATE = 3;
+static int CMD_MQTT_PUBLISH_STATE = 4;  // 1..3 are taken (3 = CMD_MQTT_CHANGE_SCR_CHANNEL when hasScr)
 
 
 #define HA_TOPIC_PREFIX "supergreen"

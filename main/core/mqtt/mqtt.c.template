@@ -148,7 +148,7 @@ static esp_mqtt_client_handle_t client;
 static QueueHandle_t cmd;
 
 static int CMD_MQTT_CONNECTED = 1;
-static int CMD_MQTT_PUBLISH_STATE = 3;
+static int CMD_MQTT_PUBLISH_STATE = 4;  // 1..3 are taken (3 = CMD_MQTT_CHANGE_SCR_CHANNEL when hasScr)
 <% if (hasScr) { %>
 static int CMD_MQTT_FORCE_FLUSH = 2;
 <% } %>
@@ -977,9 +977,9 @@ static void mqtt_task(void *param) {
 
   <% if (hasScr) { %>
     char scr_channel[MAX_KVALUE_SIZE] = {0};
-    char scr_token[MAX_KVALUE_SIZE];
+    char scr_token[MAX_KVALUE_SIZE] = {0};
+    get_broker_scrtoken(scr_token, sizeof(scr_token)-1);
     if (strlen(scr_token) != 0) {
-      get_broker_scrtoken(scr_token, sizeof(scr_token)-1);
       snprintf(scr_channel, sizeof(scr_channel)-1, "%s/%s/scrcmd", client_id, scr_token);
       ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Scr channel: %s", scr_channel);
     }
