@@ -54,6 +54,19 @@ static bool is_ref_source_absent(int source) {
   return false;  // box timer output (8/9/10) or an unmapped source
 }
 
+
+// Percentage points per loop iteration (~10s steady state, faster if a
+// setting change triggers an immediate refresh): an instant 20->100 jump on
+// a fan/blower stresses the motor and can pressure-shock a sealed grow box.
+#define MAX_DUTY_STEP 20
+
+static int step_towards(int current, int target, int max_step) {
+  int diff = target - current;
+  if (diff > max_step) diff = max_step;
+  if (diff < -max_step) diff = -max_step;
+  return current + diff;
+}
+
 static QueueHandle_t cmd;
 
 typedef enum {
@@ -72,14 +85,16 @@ static void blower_task(void *param) {
       int rmax = get_box_blower_ref_max(i);
 
       int refOutput = 50;
-      if (is_ref_source_absent(get_box_blower_ref_source(i))) {
+      bool source_absent = is_ref_source_absent(get_box_blower_ref_source(i));
+      if (source_absent) {
         refOutput = 100;
       } else if (rmin != rmax) {
         int ref = get_box_blower_ref(i);
         refOutput = (float)(ref - rmin) / (float)(rmax - rmin) * 100.0f;
         refOutput = min(100, max(refOutput, 0));
       }
-      int v = (float)vmin + ((vmax - vmin) * (float)refOutput / 100.0f);
+      int target = (float)vmin + ((vmax - vmin) * (float)refOutput / 100.0f);
+      int v = source_absent ? target : step_towards(get_box_blower_duty(i), target, MAX_DUTY_STEP);
       set_box_blower_duty(i, v);
     }
     if (c == CMD_REFRESH) {

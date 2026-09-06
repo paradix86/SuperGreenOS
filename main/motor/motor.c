@@ -34,6 +34,12 @@
 #define max(x, y) (((x) > (y)) ? (x) : (y))
 #define min(x, y) (((x) < (y)) ? (x) : (y))
 
+// Percentage points of mapped PWM output per loop iteration (~10s steady
+// state): motor.c drives MCPWM directly with no readback, so the last
+// applied value is tracked here instead of read back from hardware.
+#define MAX_MOTOR_DUTY_STEP 10.0
+static double last_duty[N_MOTOR] = {0};
+
 static QueueHandle_t cmd;
 
 typedef enum {
@@ -61,7 +67,9 @@ static void motor_task(void *param) {
     esp_task_wdt_reset();
     for (int i = 0; i < N_MOTOR; ++i) {
       if (get_motor_source(i) == 0) {
-        set_duty(i, get_motor_duty_testing(i));
+        double testing_duty = get_motor_duty_testing(i);
+        set_duty(i, testing_duty);
+        last_duty[i] = testing_duty;  // avoid a jump if source switches back
         continue;
       }
       //ESP_LOGI(SGO_LOG_NOSEND, "@MOTOR Motor: %d, duty: %d", c.motorId, get_motor_duty(i));
@@ -73,9 +81,17 @@ static void motor_task(void *param) {
       double min = get_motor_min(i);
       double max = get_motor_max(i);
       if (duty == 0) {
+        // an explicit "off" is a deliberate stop (e.g. box disabled): apply
+        // it immediately rather than ramping down.
         set_duty(i, 0);
+        last_duty[i] = 0;
       } else {
-        set_duty(i, min + (max - min) * duty / 100.0f);
+        double target = min + (max - min) * duty / 100.0f;
+        double step = target - last_duty[i];
+        if (step > MAX_MOTOR_DUTY_STEP) step = MAX_MOTOR_DUTY_STEP;
+        if (step < -MAX_MOTOR_DUTY_STEP) step = -MAX_MOTOR_DUTY_STEP;
+        last_duty[i] += step;
+        set_duty(i, last_duty[i]);
       }
     }
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS) == pdTRUE) {
