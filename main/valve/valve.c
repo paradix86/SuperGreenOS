@@ -77,8 +77,18 @@ static void valve_task(void *param) {
         set_valve_open(0);
       }
     }
-    gpio_set_level(get_valve_gpio(), get_valve_open() && !(i % get_valve_cycle_div()));
-    vTaskDelay(1.0f * (double)get_valve_cycle_div_duration() / portTICK_PERIOD_MS);
+    // VALVE_CYCLE_DIV / VALVE_CYCLE_DIV_DURATION are HTTP-writable with no clamp:
+    // 0 would divide by zero, respectively spin this task without yielding.
+    int cycle_div = get_valve_cycle_div();
+    if (cycle_div < 1) {
+      cycle_div = 1;
+    }
+    TickType_t cycle_ticks = pdMS_TO_TICKS(get_valve_cycle_div_duration());
+    if (cycle_ticks < 1) {
+      cycle_ticks = 1;
+    }
+    gpio_set_level(get_valve_gpio(), get_valve_open() && !(i % cycle_div));
+    vTaskDelay(cycle_ticks);
     ++i;
   }
 }
