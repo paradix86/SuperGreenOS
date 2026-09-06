@@ -40,6 +40,53 @@
 void preinit_app();
 void init_app(bool tester);
 
+// A handful of NVS-backed fields drive raw time-of-day math or PWM ranges with
+// no runtime validation elsewhere; a corrupted/partial NVS write (power loss
+// mid-write, a bad manual edit) could leave one out of range forever. Clamp
+// the highest-impact ones back to a safe default once at boot.
+static void sanity_check_config() {
+#ifdef MODULE_ONOFF
+  for (int i = 0; i < N_BOX; ++i) {
+    int8_t on_hour = get_box_on_hour(i);
+    if (on_hour < 0 || on_hour > 23) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d on_hour=%d out of range, resetting to 3", i, on_hour);
+      set_box_on_hour(i, 3);
+    }
+    int8_t off_hour = get_box_off_hour(i);
+    if (off_hour < 0 || off_hour > 23) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d off_hour=%d out of range, resetting to 21", i, off_hour);
+      set_box_off_hour(i, 21);
+    }
+    int8_t on_min = get_box_on_min(i);
+    if (on_min < 0 || on_min > 59) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d on_min=%d out of range, resetting to 0", i, on_min);
+      set_box_on_min(i, 0);
+    }
+    int8_t off_min = get_box_off_min(i);
+    if (off_min < 0 || off_min > 59) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d off_min=%d out of range, resetting to 0", i, off_min);
+      set_box_off_min(i, 0);
+    }
+  }
+#endif
+#ifdef MODULE_MOTOR
+  for (int i = 0; i < N_MOTOR; ++i) {
+    int8_t motor_min = get_motor_min(i);
+    if (motor_min < 0 || motor_min > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Motor %d min=%d out of range, resetting to 0", i, motor_min);
+      set_motor_min(i, 0);
+    }
+  }
+#endif
+#ifdef MODULE_MOTORS
+  int8_t curve = get_motors_curve();
+  if (curve != 0 && curve != 1) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@MAIN motors_curve=%d out of range, resetting to 0", curve);
+    set_motors_curve(0);
+  }
+#endif
+}
+
 void app_main() {
   ESP_LOGI(SGO_LOG_NOSEND, "@MAIN Welcome to SuperGreenOS version=%s\n", CONFIG_VERSION);
 
@@ -52,6 +99,8 @@ void app_main() {
   set_n_restarts(get_n_restarts()+1);
   ESP_LOGI(SGO_LOG_EVENT, "@APP Boot reset_reason=%d n_restarts=%d heap_free=%u",
       (int)esp_reset_reason(), get_n_restarts(), (unsigned int)esp_get_free_heap_size());
+
+  sanity_check_config();
 
   preinit_app();
 
