@@ -433,6 +433,15 @@ A batch of fixes and small features aimed at long-term unattended operation, on 
 - **OTA rollback**: `CONFIG_APP_ROLLBACK_ENABLE=y`. A freshly OTA'd image is confirmed valid about 30 s after boot; a crash-loop before that point automatically reverts to the previous working image on the next boot.
 - **OTA backoff**: repeated `OTA_START` requests right after a failure are rejected with an increasing backoff (1, 2, 4... capped at 15 minutes), instead of allowing an immediate retry loop.
 
+Second batch, same day, after the first one was validated with a live OTA on the controller:
+
+- **Task watchdog, remaining actuators**: `fan_task`, `blower_task` and `valve_task` now subscribe too. For the valve this matters more than for the others: the fail-closed logic above assumes the task is running.
+- **Config sanity check, remaining fields**: `BOX_N_FAN_MIN/MAX`, `FAN_REF_MIN/MAX`, `BLOWER_*` counterparts, `MOTOR_N_MAX` and `BOX_N_WATERING_POWER` are clamped to 0-100 at boot as well. `VALVE_REF_MIN/MAX` are intentionally left alone: they are raw sensor thresholds, not percentages.
+- **WiFi AP fallback**: the "stations connected to our AP" counter could underflow when an event was dropped from the 5-slot command queue, which permanently blocked the periodic AP→STA retry. It is now clamped at 0, and dropped events are logged (`@WIFI cmd queue full, dropped ...`).
+- **HTTP query parsing**: `url_decode()` no longer reads past the request buffer when a value ends in a bare `%`.
+- **Command buffer**: `execute_cmd()` reserves room for the ` -r N` suffix it appends, closing a latent stack overflow that no current caller could reach.
+- **Shared sensor-source map**: the `is_ref_source_absent()` helper used by fan/blower/valve lives in one place (`main/core/ref_source.h`) instead of three identical copies.
+
 ## See also
 
 - `README_TEST.md` for safe UI-only testing

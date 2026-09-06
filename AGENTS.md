@@ -82,6 +82,7 @@ Implemented on this branch (build-verified, not yet hardware-tested):
 - `try_ota()` verifies the download against `<basedir>/<ts>/firmware.bin.sha256` when the server publishes it (see `scripts/build_maintenance_ota.sh`) before calling `esp_ota_set_boot_partition`; a missing hash file is a warning, not a hard failure, a mismatch aborts the update
 - `CONFIG_APP_ROLLBACK_ENABLE=y`: a freshly OTA'd image is confirmed valid ~30 s after boot (`ota.c`'s `confirm_valid_task`); a boot-loop before that point auto-reverts to the previous image on the next boot
 - `request_ota_start()` backs off after consecutive failures (1/2/4/.../15 min) instead of accepting an immediate retry; `OTA_STATUS_FAILED` and the log line explain a rejected request
+- all actuator loops (`mqtt_task`, `watering_task`, `motor_task`, `fan_task`, `blower_task`, `valve_task`) are registered with the ESP-IDF task watchdog; `sanity_check_config()` in `app_main.c` clamps every 0-100 PWM/percentage field at boot; `wifi.c` clamps the AP station counter at 0 and logs dropped queue commands (`@WIFI cmd queue full, dropped ...`); `is_ref_source_absent()` is shared via `main/core/ref_source.h` — 2026-09-06 second batch, build-verified, not yet hardware-tested
 
 ## Frozen runbooks
 
