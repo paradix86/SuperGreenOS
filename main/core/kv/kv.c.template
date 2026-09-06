@@ -87,6 +87,14 @@ void init_kv() {
    */
 }
 
+// A failed NVS write (typically ESP_ERR_NVS_NOT_ENOUGH_SPACE on the 16 KB
+// partition) used to abort the firmware: with periodic writers that is a
+// reboot loop. Keep running on the RAM copy and shout instead.
+static void kv_report_write_error(const char *key, esp_err_t err) {
+  ESP_LOGE(SGO_LOG_NOSEND, "@KV nvs write of %s failed: 0x%x%s", key, err,
+      err == ESP_ERR_NVS_NOT_ENOUGH_SPACE ? " (NVS partition full)" : "");
+}
+
 bool hasi8(const char * key) {
   int8_t value;
   esp_err_t err = nvs_get_i8(kv_handle, (const char *)key, &value);
@@ -96,14 +104,23 @@ bool hasi8(const char * key) {
 int8_t geti8(const char * key) {
   int8_t value;
   esp_err_t err = nvs_get_i8(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void seti8(const char * key, int8_t value) {
   esp_err_t err = nvs_set_i8(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaulti8(const char * key, int8_t value) {
@@ -121,14 +138,23 @@ bool hasui8(const char * key) {
 uint8_t getui8(const char * key) {
   uint8_t value;
   esp_err_t err = nvs_get_u8(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void setui8(const char * key, uint8_t value) {
   esp_err_t err = nvs_set_u8(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaultui8(const char * key, uint8_t value) {
@@ -146,14 +172,23 @@ bool hasi16(const char * key) {
 int16_t geti16(const char * key) {
   int16_t value;
   esp_err_t err = nvs_get_i16(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void seti16(const char * key, int16_t value) {
   esp_err_t err = nvs_set_i16(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaulti16(const char * key, int16_t value) {
@@ -171,14 +206,23 @@ bool hasui16(const char * key) {
 uint16_t getui16(const char * key) {
   uint16_t value;
   esp_err_t err = nvs_get_u16(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void setui16(const char * key, uint16_t value) {
   esp_err_t err = nvs_set_u16(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaultui16(const char * key, uint16_t value) {
@@ -196,14 +240,23 @@ bool hasi32(const char * key) {
 int32_t geti32(const char * key) {
   int32_t value;
   esp_err_t err = nvs_get_i32(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void seti32(const char * key, int32_t value) {
   esp_err_t err = nvs_set_i32(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaulti32(const char * key, int32_t value) {
@@ -221,14 +274,23 @@ bool hasui32(const char * key) {
 uint32_t getui32(const char * key) {
   uint32_t value;
   esp_err_t err = nvs_get_u32(kv_handle, (const char *)key, &value);
-  ESP_ERROR_CHECK(err);
+  if (err != ESP_OK) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV nvs_get %s failed: 0x%x, returning 0", key, err);
+    return 0;
+  }
   return (int)value;
 }
 
 void setui32(const char * key, uint32_t value) {
   esp_err_t err = nvs_set_u32(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaultui32(const char * key, uint32_t value) {
@@ -280,8 +342,14 @@ void getstr(const char * key, char *value, size_t length) {
 
 void setstr(const char * key, const char * value) {
   esp_err_t err = nvs_set_str(kv_handle, (const char *)key, value);
-  ESP_ERROR_CHECK(err);
-  nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+    return;
+  }
+  err = nvs_commit(kv_handle);
+  if (err != ESP_OK) {
+    kv_report_write_error(key, err);
+  }
 }
 
 void defaultstr(const char * key, const char * value) {

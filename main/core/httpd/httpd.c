@@ -24,6 +24,7 @@
 #include <esp_http_server.h>
 #include <esp_system.h>
 #include <esp_timer.h>
+#include <nvs.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -310,6 +311,11 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   unsigned long heap_free = (unsigned long)esp_get_free_heap_size();
   unsigned long heap_min_free = (unsigned long)esp_get_minimum_free_heap_size();
   long uptime_s = (long)(esp_timer_get_time() / 1000000LL);
+  nvs_stats_t nvs_stats = {0};
+  if (nvs_get_stats(NULL, &nvs_stats) != ESP_OK) {
+    nvs_stats.used_entries = 0;
+    nvs_stats.free_entries = 0;
+  }
   char broker_url[MAX_KVALUE_SIZE] = {0};
   char broker_clientid[MAX_KVALUE_SIZE] = {0};
   char ret[1024] = {0};
@@ -321,7 +327,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"heap_free\":%lu,"
-      "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"broker_url\":\"%s\","
+      "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
+      "\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
       (long)mqtt_disc_idx,
@@ -334,6 +341,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       heap_free,
       heap_min_free,
       uptime_s,
+      (unsigned int)nvs_stats.used_entries,
+      (unsigned int)nvs_stats.free_entries,
       broker_url,
       broker_clientid);
 
