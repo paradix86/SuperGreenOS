@@ -25,6 +25,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 
 #include "../log/log.h"
 #include "../kv/kv.h"
@@ -32,6 +33,46 @@
 
 #define MAX_SHORT_REBOOTS 5
 #define N_SHORT_REBOOTS "NSHRBTS"
+
+// esp_get_minimum_free_heap_size() says how low the heap ever got, not when:
+// sample it periodically so /mqttdiag can also report the uptime at which the
+// minimum was reached and how many times free heap dipped below the floor.
+#define HEAP_WATCH_PERIOD_MS 5000
+#define HEAP_LOW_FLOOR_BYTES 8192
+
+static volatile long heap_min_free_at_s = 0;
+static volatile int heap_low_events = 0;
+
+static void heap_watch_task(void *args) {
+  unsigned int last_min = esp_get_minimum_free_heap_size();
+  bool was_low = false;
+  while (true) {
+    unsigned int min_free = esp_get_minimum_free_heap_size();
+    unsigned int free_now = esp_get_free_heap_size();
+    long uptime_s = (long)(esp_timer_get_time() / 1000000LL);
+    if (min_free < last_min) {
+      last_min = min_free;
+      heap_min_free_at_s = uptime_s;
+      // NOSEND on purpose: publishing over MQTT allocates, and we are here
+      // precisely because memory is scarce.
+      ESP_LOGW(SGO_LOG_NOSEND, "@HEAP new minimum %u bytes at uptime %lds (free now %u)", min_free, uptime_s, free_now);
+    }
+    bool is_low = free_now < HEAP_LOW_FLOOR_BYTES;
+    if (is_low && !was_low) {
+      ++heap_low_events;
+    }
+    was_low = is_low;
+    vTaskDelay(HEAP_WATCH_PERIOD_MS / portTICK_PERIOD_MS);
+  }
+}
+
+long get_heap_min_free_at() {
+  return heap_min_free_at_s;
+}
+
+int get_heap_low_events() {
+  return heap_low_events;
+}
 
 // Comma-separated esp_reset_reason_t values, newest first, so a crash-loop
 // pattern is visible the next time the device is reachable, not just the
@@ -112,6 +153,11 @@ void init_reboot() {
   BaseType_t ret2 = xTaskCreatePinnedToCore(reboot_task, "REBOOT", 2048, NULL, 10, NULL, 1);
   if (ret2 != pdPASS) {
     ESP_LOGE(SGO_LOG_NOSEND, "@REBOOT Failed to create task");
+  }
+
+  BaseType_t ret3 = xTaskCreatePinnedToCore(heap_watch_task, "HEAPWATCH", 2048, NULL, tskIDLE_PRIORITY + 1, NULL, 1);
+  if (ret3 != pdPASS) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@REBOOT Failed to create heap watch task");
   }
 }
 

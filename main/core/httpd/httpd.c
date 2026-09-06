@@ -342,7 +342,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"reset_history\":\"%s\",\"heap_free\":%lu,"
-      "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
+      "\"heap_min_free\":%lu,\"heap_min_free_at\":%ld,\"heap_low_events\":%d,"
+      "\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
       "\"mqtt_stack_hwm\":%ld,\"time_valid\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
@@ -356,6 +357,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       reset_history,
       heap_free,
       heap_min_free,
+      get_heap_min_free_at(),
+      get_heap_low_events(),
       uptime_s,
       (unsigned int)nvs_stats.used_entries,
       (unsigned int)nvs_stats.free_entries,

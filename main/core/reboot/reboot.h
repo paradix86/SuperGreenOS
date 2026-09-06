@@ -26,6 +26,10 @@ void init_reboot();
 void reboot_esp();
 void reset_on_next_reboot();
 void get_reset_history(char *dest, size_t len);
+// uptime (s) at which esp_get_minimum_free_heap_size() last reached a new low,
+// and number of times free heap dipped below 8 KB since boot (5 s sampling)
+long get_heap_min_free_at();
+int get_heap_low_events();
 
 int on_set_reboot(int value);
 
