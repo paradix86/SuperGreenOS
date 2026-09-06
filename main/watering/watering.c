@@ -75,8 +75,10 @@ static void watering_task(void *param) {
       }
 
       // WATERING_LEFT: cycles still to start (-1 = unlimited). The credit is consumed
-      // when a cycle starts, together with WATERING_LAST, so both survive a reboot
-      // and a cycle can never be counted twice or not at all.
+      // when a cycle starts, right after WATERING_LAST: both are NVS fields, so a
+      // reboot cannot lose the count. LAST is written first on purpose: a reset
+      // between the two commits then resumes the cycle without charging it (one
+      // extra watering) rather than charging a cycle that never ran.
       const int left = get_box_watering_left(i);
       const int last = get_box_watering_last(i);
       const int period = get_box_watering_period(i);
@@ -91,10 +93,10 @@ static void watering_task(void *param) {
       // a LAST in the future means the clock was moved back: treat it as expired
       const bool period_elapsed = last > now || now - last > period * 60;
       if (left != 0 && period_elapsed) {
+        set_box_watering_last(i, now);
         if (left > 0) {
           set_box_watering_left(i, left - 1);
         }
-        set_box_watering_last(i, now);
         set_box_watering_duty(i, power);
         ESP_LOGI(SGO_LOG_NOSEND, "@WATERING Box %d cycle started, %d left", i, get_box_watering_left(i));
       } else {
