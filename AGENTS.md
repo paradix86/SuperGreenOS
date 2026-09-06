@@ -28,11 +28,11 @@ If any live step becomes unstable or uncertain, stop immediately and use the com
 
 - Build system: legacy ESP-IDF `3.3.1` + `make`
 - Generation order is mandatory before a correct build:
-  1. `./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v2.1 config.controller.json`
+  1. `./update_config.sh config_gen/config/SuperGreenOS/Controllers/Controller/v3 config.controller.json`
   2. `bash ./update_templates.sh config.controller.json`
   3. `bash ./update_htmlapp.sh config.controller.json`
 - `scripts/build.sh` runs that flow plus `make defconfig && make` (verified 2026-09-06 on WSL Ubuntu 22.04, firmware.bin 1046560 bytes). `setup/setup_supergreenos_build_env.sh` bootstraps the toolchain on Ubuntu/WSL.
-- `config.controller.json` is tracked but generated; keep it in sync with the CUE sources (it was a stale v3 export without `sensor_health` until 2026-09-06).
+- `config.controller.json` is tracked but generated (target `Controller/v3` since 2026-09-06, board label `sgl rev 3.11`); keep it in sync with the CUE sources.
 - A clean compile was verified only after the generation flow above plus:
 
 ```bash
@@ -78,7 +78,7 @@ Implemented on this branch (build-verified, not yet hardware-tested):
 
 - `OTA_START` is released to `0` by `ota_task` once the request is handled; read `OTA_STATUS` for the outcome (`0` idle/up-to-date, `1` in progress, `2` disabled, `3` failed)
 - a new `OTA_START=1` while a previous request is still queued or running is logged and ignored (`OTA_START` stays `1`), so a double click or a Home Assistant retry cannot queue a second update
-- `/mqttdiag` reports `mqtt_connected` and `ota_status`
+- `/mqttdiag` reports `mqtt_connected`, `ota_status`, `reset_reason` (esp_reset_reason_t of the current boot: 1 power-on, 3 software, 4 panic, 5/6/7 watchdogs, 9 brownout), `heap_free`, `heap_min_free` and `uptime_s`
 
 ## Frozen runbooks
 
