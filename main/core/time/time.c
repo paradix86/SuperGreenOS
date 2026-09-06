@@ -53,7 +53,10 @@ static void apply_timezone(const char *tz) {
     unsetenv("TZ");
   }
   tzset();
-  ESP_LOGI(SGO_LOG_NOSEND, "@TIME Timezone \"%s\" applied", tz != NULL ? tz : "");
+  // onoff.c/season.c call localtime_r() on every evaluation (no caching), so
+  // a schedule set for e.g. 08:00 local time starts firing at the new local
+  // 08:00 immediately, not after the next reboot.
+  ESP_LOGI(SGO_LOG_NOSEND, "@TIME Timezone \"%s\" applied, schedules now use local time immediately", tz != NULL ? tz : "UTC");
 }
 
 void init_time() {
