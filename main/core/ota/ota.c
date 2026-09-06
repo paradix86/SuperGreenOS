@@ -400,6 +400,11 @@ static void try_ota(const char *new_timestamp)
   return;
 }
 
+// True from the moment a request is queued until ota_task has handled it. Without
+// it a second OTA_START (double click, HA retry) was queued silently and ran right
+// after the first one finished, with OTA_START already back to 0.
+static volatile bool ota_request_pending = false;
+
 static void ota_task(void *pvParameter) {
   uint8_t c;
 
@@ -435,6 +440,7 @@ static void ota_task(void *pvParameter) {
 
     // The request is edge-triggered: release OTA_START so clients can tell
     // "handled" (0 + status) from "still queued" (1) and can trigger again.
+    ota_request_pending = false;
     set_ota_start(0);
     ESP_LOGI(SGO_LOG_NOSEND, "@OTA Request handled, status=%d", get_ota_status());
   }
@@ -479,11 +485,18 @@ int request_ota_start(int value) {
     return 0;
   }
 
+  if (ota_request_pending) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@OTA request_ota_start ignored, previous request still being handled (status=%d)", get_ota_status());
+    return 1;
+  }
+  ota_request_pending = true;
+
   uint8_t cmd_data = 1;
   UBaseType_t queue_space = uxQueueSpacesAvailable(cmd);
   ESP_LOGI(SGO_LOG_NOSEND, "@OTA request_ota_start enqueue attempt queue_space=%u", (unsigned int)queue_space);
   if (xQueueSend(cmd, &cmd_data, pdMS_TO_TICKS(100)) != pdTRUE) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA request_ota_start enqueue failed");
+    ota_request_pending = false;
     return 0;
   }
 
