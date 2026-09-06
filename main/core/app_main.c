@@ -64,16 +64,10 @@ void app_main() {
   init_tester();
 #endif
 
-  init_wifi();
-
-  init_mqtt();
-  init_ota();
-  init_time();
-
-#ifdef MODULE_I2C
-  init_i2c();
-#endif
-
+  // Actuator modules (LED, motor, fan, blower, watering, ...) are configured
+  // and zeroed here, before WiFi/MQTT/OTA come up: a remote command or a
+  // stray retained MQTT message must never reach an actuator that hasn't
+  // been put in a defined state yet.
 #ifdef MODULE_TESTER
   bool tester_enabled = get_tester_enabled() != 0;
   init_app(tester_enabled);
@@ -82,6 +76,16 @@ void app_main() {
   }
 #else
   init_app(false);
+#endif
+
+  init_wifi();
+
+  init_mqtt();
+  init_ota();
+  init_time();
+
+#ifdef MODULE_I2C
+  init_i2c();
 #endif
 
   init_stat_dump();
