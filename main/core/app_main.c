@@ -76,6 +76,11 @@ static void sanity_check_config() {
       ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Motor %d min=%d out of range, resetting to 0", i, motor_min);
       set_motor_min(i, 0);
     }
+    int8_t motor_max = get_motor_max(i);
+    if (motor_max < 0 || motor_max > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Motor %d max=%d out of range, resetting to 100", i, motor_max);
+      set_motor_max(i, 100);
+    }
   }
 #endif
 #ifdef MODULE_MOTORS
@@ -83,6 +88,63 @@ static void sanity_check_config() {
   if (curve != 0 && curve != 1) {
     ESP_LOGW(SGO_LOG_NOSEND, "@MAIN motors_curve=%d out of range, resetting to 0", curve);
     set_motors_curve(0);
+  }
+#endif
+#ifdef MODULE_FAN
+  for (int i = 0; i < N_BOX; ++i) {
+    int8_t fan_min = get_box_fan_min(i);
+    if (fan_min < 0 || fan_min > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d fan_min=%d out of range, resetting to 0", i, fan_min);
+      set_box_fan_min(i, 0);
+    }
+    int8_t fan_max = get_box_fan_max(i);
+    if (fan_max < 0 || fan_max > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d fan_max=%d out of range, resetting to 100", i, fan_max);
+      set_box_fan_max(i, 100);
+    }
+    int8_t fan_ref_min = get_box_fan_ref_min(i);
+    if (fan_ref_min < 0 || fan_ref_min > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d fan_ref_min=%d out of range, resetting to 0", i, fan_ref_min);
+      set_box_fan_ref_min(i, 0);
+    }
+    int8_t fan_ref_max = get_box_fan_ref_max(i);
+    if (fan_ref_max < 0 || fan_ref_max > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d fan_ref_max=%d out of range, resetting to 100", i, fan_ref_max);
+      set_box_fan_ref_max(i, 100);
+    }
+  }
+#endif
+#ifdef MODULE_BLOWER
+  for (int i = 0; i < N_BOX; ++i) {
+    int8_t blower_min = get_box_blower_min(i);
+    if (blower_min < 0 || blower_min > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d blower_min=%d out of range, resetting to 0", i, blower_min);
+      set_box_blower_min(i, 0);
+    }
+    int8_t blower_max = get_box_blower_max(i);
+    if (blower_max < 0 || blower_max > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d blower_max=%d out of range, resetting to 100", i, blower_max);
+      set_box_blower_max(i, 100);
+    }
+    int8_t blower_ref_min = get_box_blower_ref_min(i);
+    if (blower_ref_min < 0 || blower_ref_min > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d blower_ref_min=%d out of range, resetting to 0", i, blower_ref_min);
+      set_box_blower_ref_min(i, 0);
+    }
+    int8_t blower_ref_max = get_box_blower_ref_max(i);
+    if (blower_ref_max < 0 || blower_ref_max > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d blower_ref_max=%d out of range, resetting to 100", i, blower_ref_max);
+      set_box_blower_ref_max(i, 100);
+    }
+  }
+#endif
+#ifdef MODULE_WATERING
+  for (int i = 0; i < N_BOX; ++i) {
+    int8_t watering_power = get_box_watering_power(i);
+    if (watering_power < 0 || watering_power > 100) {
+      ESP_LOGW(SGO_LOG_NOSEND, "@MAIN Box %d watering_power=%d out of range, resetting to 100", i, watering_power);
+      set_box_watering_power(i, 100);
+    }
   }
 #endif
 }
