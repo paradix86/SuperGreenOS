@@ -21,6 +21,11 @@
 
 #define OTA_BUILD_TIMESTAMP 0
 
+// Delay before confirming a freshly OTA-updated image as valid (see
+// CONFIG_APP_ROLLBACK_ENABLE): long enough to get past early-init crashes,
+// short enough that few unrelated reboots happen while still unconfirmed.
+#define OTA_MARK_VALID_DELAY_S 30
+
 typedef enum {
   OTA_STATUS_IDLE,
   OTA_STATUS_IN_PROGRESS,
