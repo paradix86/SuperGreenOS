@@ -25,6 +25,7 @@ typedef enum {
   OTA_STATUS_IDLE,
   OTA_STATUS_IN_PROGRESS,
   OTA_STATUS_DISABLED,
+  OTA_STATUS_FAILED,
 } ota_status;
 
 void init_ota();

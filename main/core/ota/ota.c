@@ -421,14 +421,22 @@ static void ota_task(void *pvParameter) {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA Start OTA procedure");
         set_ota_status(OTA_STATUS_IN_PROGRESS);
         try_ota(new_timestamp);
+        // try_ota() only returns when the update did not complete: on success it restarts.
+        ESP_LOGE(SGO_LOG_NOSEND, "@OTA Update failed, see previous errors");
+        set_ota_status(OTA_STATUS_FAILED);
       } else if (check_result == OTA_VERSION_CHECK_UP_TO_DATE) {
         ESP_LOGI(SGO_LOG_NOSEND, "@OTA Firmware is up-to-date");
         set_ota_status(OTA_STATUS_IDLE);
       } else {
         ESP_LOGE(SGO_LOG_NOSEND, "@OTA Firmware check failed (network/response error)");
-        set_ota_status(OTA_STATUS_IDLE);
+        set_ota_status(OTA_STATUS_FAILED);
       }
     }
+
+    // The request is edge-triggered: release OTA_START so clients can tell
+    // "handled" (0 + status) from "still queued" (1) and can trigger again.
+    set_ota_start(0);
+    ESP_LOGI(SGO_LOG_NOSEND, "@OTA Request handled, status=%d", get_ota_status());
   }
 }
 
