@@ -35,6 +35,35 @@
                     "intlen": 32,
                     "suffix": "time",
                     "caps_name": "TIME"
+                },
+                "tz": {
+                    "name": "time_tz",
+                    "dump_freq": 60,
+                    "indir": {
+                        "enable": false
+                    },
+                    "default": "",
+                    "nvs": {
+                        "key": "TIME_TZ",
+                        "enable": true,
+                        "manual": false
+                    },
+                    "write_cb": true,
+                    "remote": false,
+                    "type": "string",
+                    "nosend": false,
+                    "helper": "",
+                    "ble": {
+                        "enable": false
+                    },
+                    "http": {
+                        "enable": true,
+                        "write": true,
+                        "read": true
+                    },
+                    "disabled": false,
+                    "suffix": "tz",
+                    "caps_name": "TIME_TZ"
                 }
             },
             "enabled": true,

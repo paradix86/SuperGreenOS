@@ -20,6 +20,21 @@
             },
           
             {
+              "core": true,
+              "name": "time_tz",
+              "type": "string",
+              "integer": false,
+              "caps_name": "TIME_TZ",
+              "module": "time",
+              
+              
+              "write": true,
+              
+              
+              "default": ""
+            },
+          
+            {
               "core": false,
               "name": "box_0_temp",
               "type": "integer",

@@ -25,5 +25,6 @@ void init_time();
 time_t get_box_time();
 
 int on_set_time(int value);
+const char *on_set_time_tz(const char *value);
 
 #endif

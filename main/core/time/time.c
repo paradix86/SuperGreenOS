@@ -17,6 +17,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <string.h>
 
@@ -43,7 +44,23 @@ static void time_task(void *param);
 static void ntp_task(void *param);
 static void setup(void);
 
+// TIME_TZ is a POSIX TZ string; empty means UTC, which is what every schedule
+// assumed before this setting existed (localtime_r in onoff/season).
+static void apply_timezone(const char *tz) {
+  if (tz != NULL && tz[0] != 0) {
+    setenv("TZ", tz, 1);
+  } else {
+    unsetenv("TZ");
+  }
+  tzset();
+  ESP_LOGI(SGO_LOG_NOSEND, "@TIME Timezone \"%s\" applied", tz != NULL ? tz : "");
+}
+
 void init_time() {
+  char tz[64] = {0};
+  get_time_tz(tz, sizeof(tz) - 1);
+  apply_timezone(tz);
+
   BaseType_t ret = xTaskCreatePinnedToCore(time_task, "TIME", 4096, NULL, 10, NULL, 1);
   if (ret != pdPASS) {
     ESP_LOGE(SGO_LOG_NOSEND, "@TIME Failed to create task");
@@ -92,6 +109,11 @@ static void setup(void) {
 }
 
 /* ble callbacks */
+
+const char *on_set_time_tz(const char *value) {
+  apply_timezone(value);
+  return value;
+}
 
 int on_set_time(int value) {
   //ESP_LOGI(SGO_LOG_NOSEND, "@TIMER on_set_time = %d", (int)value);
