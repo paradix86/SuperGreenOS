@@ -24,11 +24,21 @@
 
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
+#include "../core/modules.h"
+
+#ifdef MODULE_MOTOR
+#include "../motor/motor.h"
+#endif
+
+// Below this epoch (2017-07-14) the clock was never set: after an NVS erase
+// time() starts near 0 until NTP syncs, and every "now - last" test is garbage.
+#define MIN_VALID_EPOCH 1500000000
 
 #define max(x, y) (((x) > (y)) ? (x) : (y))
 #define min(x, y) (((x) < (y)) ? (x) : (y))
 
 static QueueHandle_t cmd;
+static bool was_watering[N_BOX] = { false };
 
 typedef enum {
   CMD_NO_ACTION,
@@ -53,27 +63,43 @@ static void watering_task(void *param) {
   while (true) {
     time_t now;
     time(&now);
+    const bool clock_valid = now >= MIN_VALID_EPOCH;
     for (int i = 0; i < N_BOX; ++i) {
       if (get_box_enabled(i) != 1) continue;
-      if (get_box_watering_left(i) == 0) continue;
+      int left = get_box_watering_left(i);
+      if (left == 0) continue;
+
+      if (!clock_valid) {
+        if (get_box_watering_duty(i) != 0) {
+          ESP_LOGW(SGO_LOG_NOSEND, "@WATERING Clock not set, keeping box %d pump off", i);
+          set_box_watering_duty(i, 0);
+        }
+        was_watering[i] = false;
+        continue;
+      }
 
       const int last = get_box_watering_last(i);
       const int period = get_box_watering_period(i);
       const int duration = get_box_watering_duration(i);
       const int power = get_box_watering_power(i);
 
-      if (now - last < duration) {
+      bool watering = now >= last && now - last < duration;
+      if (watering) {
         set_box_watering_duty(i, power);
-      } else if (now - last > duration) {
-        if (get_box_watering_left(i) > 0) {
-          set_box_watering_left(i, get_box_watering_left(i)-1);
-        }
+      } else {
         set_box_watering_duty(i, 0);
-        if (now - last > period * 60) {
+        // one watering just finished: consume one credit (only once, not every second)
+        if (was_watering[i] && left > 0) {
+          --left;
+          set_box_watering_left(i, left);
+        }
+        if (left != 0 && now - last > period * 60) {
           set_box_watering_last(i, now);
           set_box_watering_duty(i, power);
+          watering = true;
         }
       }
+      was_watering[i] = watering;
     }
     if (c == CMD_REFRESH) {
 #if defined(MODULE_MOTOR)
