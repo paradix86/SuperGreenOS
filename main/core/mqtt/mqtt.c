@@ -26,6 +26,7 @@
 #include "sodium/utils.h"
 #include "mbedtls/sha256.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "nvs.h"
 #include <time.h>
 
@@ -878,9 +879,15 @@ static void mqtt_task(void *param) {
   client = esp_mqtt_client_init(&mqtt_cfg);
   esp_mqtt_client_start(client);
 
+  // Subscribe to the task watchdog: a future bug that blocks this task
+  // (network stall, deadlock) now panics and reboots instead of silently
+  // wedging until someone notices and power-cycles the device.
+  esp_task_wdt_add(NULL);
+
 
 
   while(true) {
+    esp_task_wdt_reset();
     mqtt_stack_hwm = (int32_t)uxTaskGetStackHighWaterMark(NULL);
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {

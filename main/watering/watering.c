@@ -25,6 +25,7 @@
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
 #include "../core/modules.h"
+#include "esp_task_wdt.h"
 
 #ifdef MODULE_MOTOR
 #include "../motor/motor.h"
@@ -59,7 +60,9 @@ void init_watering() {
 
 static void watering_task(void *param) {
   watering_cmd c = CMD_NO_ACTION;
+  esp_task_wdt_add(NULL);
   while (true) {
+    esp_task_wdt_reset();
     time_t now;
     time(&now);
     const bool clock_valid = now >= MIN_VALID_EPOCH;

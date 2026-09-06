@@ -29,6 +29,7 @@
 
 #include "../core/log/log.h"
 #include "../core/kv/kv.h"
+#include "esp_task_wdt.h"
 
 #define max(x, y) (((x) > (y)) ? (x) : (y))
 #define min(x, y) (((x) < (y)) ? (x) : (y))
@@ -54,8 +55,10 @@ static void set_duty(int i, float duty_cycle)
 
 static void motor_task(void *param) {
   motor_cmd c = {.cmd = -1};
+  esp_task_wdt_add(NULL);
 
   while (1) {
+    esp_task_wdt_reset();
     for (int i = 0; i < N_MOTOR; ++i) {
       if (get_motor_source(i) == 0) {
         set_duty(i, get_motor_duty_testing(i));
