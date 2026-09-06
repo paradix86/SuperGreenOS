@@ -29,6 +29,18 @@
 #include "../blower/blower.h"
 #endif
 
+#ifdef MODULE_FAN
+#include "../fan/fan.h"
+#endif
+
+#ifdef MODULE_WATERING
+#include "../watering/watering.h"
+#endif
+
+#ifdef MODULE_MOTOR
+#include "../motor/motor.h"
+#endif
+
 //  KV Callbacks
 
 int on_set_box_led_dim(int boxId, int value) {
@@ -55,6 +67,19 @@ int on_set_box_enabled(int boxId, int value) {
 
 #ifdef MODULE_BLOWER
     set_box_blower_duty(boxId, 0);
+#endif
+
+#ifdef MODULE_FAN
+    set_box_fan_duty(boxId, 0);
+#endif
+
+#ifdef MODULE_WATERING
+    set_box_watering_duty(boxId, 0);
+#endif
+
+#ifdef MODULE_MOTOR
+    // push the zeroed duties to the PWM now instead of waiting for the 10 s motor cycle
+    refresh_motors();
 #endif
 
   }
