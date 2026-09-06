@@ -26,6 +26,8 @@
 #include "sodium/utils.h"
 #include "mbedtls/sha256.h"
 #include "esp_system.h"
+#include "nvs.h"
+#include <time.h>
 
 #include "../log/log.h"
 #include "../kv/kv.h"
@@ -937,17 +939,32 @@ static esp_err_t mqtt_event_handler(esp_mqtt_event_handle_t event) {
 
 static void mqtt_publish_diag(const char *client_id) {
   char topic[MAX_KVALUE_SIZE] = {0};
-  char payload[192] = {0};
+  char payload[384] = {0};
+  nvs_stats_t nvs_stats = {0};
+  if (nvs_get_stats(NULL, &nvs_stats) != ESP_OK) {
+    nvs_stats.used_entries = 0;
+    nvs_stats.free_entries = 0;
+  }
+  time_t now_s = 0;
+  time(&now_s);
+  int time_valid = now_s >= 1500000000 ? 1 : 0;
   snprintf(topic, sizeof(topic), "supergreen/%s/diag", client_id);
   snprintf(payload, sizeof(payload),
-      "{\"n_restarts\":%d,\"ota_ts\":%ld,\"heap_free\":%lu,"
-      "\"uptime_s\":%lu,\"state\":%d,\"box_0_enabled\":%d}",
+      "{\"n_restarts\":%d,\"ota_ts\":%ld,\"heap_free\":%lu,\"heap_min_free\":%lu,"
+      "\"uptime_s\":%lu,\"state\":%d,\"box_0_enabled\":%d,\"reset_reason\":%d,"
+      "\"nvs_used\":%u,\"nvs_free\":%u,\"mqtt_stack_hwm\":%ld,\"time_valid\":%d}",
       (int)get_n_restarts(),
       (long)get_ota_timestamp(),
       (unsigned long)esp_get_free_heap_size(),
+      (unsigned long)esp_get_minimum_free_heap_size(),
       (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS / 1000),
       (int)get_state(),
-      (int)get_box_0_enabled());
+      (int)get_box_0_enabled(),
+      (int)esp_reset_reason(),
+      (unsigned int)nvs_stats.used_entries,
+      (unsigned int)nvs_stats.free_entries,
+      (long)mqtt_stack_hwm,
+      time_valid);
   mqtt_publish_message(topic, payload, 0);
 }
 
