@@ -32,6 +32,7 @@
 #include "../kv/kv.h"
 #include "../log/log.h"
 #include "../mqtt/mqtt.h"
+#include "../reboot/reboot.h"
 
 #define IS_URI_SEP(c) (c == '?' || c == '&' || c == '=')
 #define MQTT_DIAG_KEY_STAGE "MQTT_STG"
@@ -325,15 +326,17 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   // use well inside the HTTP server task; getstr() truncates longer values.
   char broker_url[128] = {0};
   char broker_clientid[128] = {0};
-  char ret[1024] = {0};
+  char reset_history[128] = {0};
+  char ret[1200] = {0};
 
   getstr(BROKER_URL, broker_url, sizeof(broker_url) - 1);
   getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
+  get_reset_history(reset_history, sizeof(reset_history) - 1);
 
   int written = snprintf(ret, sizeof(ret),
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
-      "\"ota_status\":%d,\"reset_reason\":%d,\"heap_free\":%lu,"
+      "\"ota_status\":%d,\"reset_reason\":%d,\"reset_history\":\"%s\",\"heap_free\":%lu,"
       "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
       "\"mqtt_stack_hwm\":%ld,\"time_valid\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
@@ -345,6 +348,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       n_restarts,
       ota_status,
       reset_reason,
+      reset_history,
       heap_free,
       heap_min_free,
       uptime_s,
