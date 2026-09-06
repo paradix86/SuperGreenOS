@@ -81,7 +81,8 @@ static void watering_task(void *param) {
       // extra watering) rather than charging a cycle that never ran.
       const int left = get_box_watering_left(i);
       const int last = get_box_watering_last(i);
-      const int period = get_box_watering_period(i);
+      // a period of 0 would restart a cycle (two NVS writes) every second
+      const int period = get_box_watering_period(i) < 1 ? 1 : get_box_watering_period(i);
       const int duration = get_box_watering_duration(i);
       const int power = get_box_watering_power(i);
 
