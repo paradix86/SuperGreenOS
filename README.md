@@ -419,6 +419,20 @@ Key facts:
 
 See [`docs/config-recovery.md`](docs/config-recovery.md) for the full procedure.
 
+## Stability hardening (2026-09-06)
+
+A batch of fixes and small features aimed at long-term unattended operation, on top of the memory-safety and reboot-loop fixes above:
+
+- **Fan/blower fail-safe**: if the sensor selected as reference source is disconnected or unreadable, fan/blower duty goes to maximum instead of freezing on the last reading (heat/humidity buildup is worse than extra airflow). The valve module does the opposite (fails closed) since an unmonitored solenoid can flood or over-dose CO2.
+- **Ramped duty changes**: fan/blower/motor duty now steps toward a new setpoint (20 percentage points per ~10 s tick for fan/blower, 10 for motor) instead of jumping instantly, reducing mechanical stress. An explicit "off" (box disabled) still applies immediately.
+- **Boot order**: actuator modules (LED, motor, fan, blower, watering, ...) are configured and zeroed before WiFi/MQTT/OTA come up, so the controller is never reachable over the network before its own outputs are in a defined state.
+- **Task watchdog**: `mqtt_task`, `watering_task` and `motor_task` subscribe to the 30 s ESP-IDF task watchdog, so a future bug that blocks one of them panics and reboots instead of silently wedging.
+- **Config sanity check**: `BOX_N_ON_HOUR`/`OFF_HOUR`/`ON_MIN`/`OFF_MIN`, `MOTOR_N_MIN` and `MOTORS_CURVE` are range-checked once at boot and reset to a safe default if a partially corrupted NVS write left one out of range.
+- **Reset history**: `/mqttdiag` reports `reset_history`, the last 10 `esp_reset_reason_t` values (newest first), so a crash-loop pattern is visible the next time the device reconnects, not just the single latest reason.
+- **OTA integrity check**: if the OTA server publishes `<basedir>/<ts>/firmware.bin.sha256` (produced automatically by `scripts/build_maintenance_ota.sh`), the download is hashed as it streams to flash and the new partition is never activated on a mismatch. Missing hash file → unverified OTA (warning only), not a hard failure.
+- **OTA rollback**: `CONFIG_APP_ROLLBACK_ENABLE=y`. A freshly OTA'd image is confirmed valid about 30 s after boot; a crash-loop before that point automatically reverts to the previous working image on the next boot.
+- **OTA backoff**: repeated `OTA_START` requests right after a failure are rejected with an increasing backoff (1, 2, 4... capped at 15 minutes), instead of allowing an immediate retry loop.
+
 ## See also
 
 - `README_TEST.md` for safe UI-only testing
