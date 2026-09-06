@@ -27,6 +27,12 @@
 
 static scd30_handle scd30_handlers[N_SCD30] = {0};
 
+// readMeasurement() also fails when no sample is ready yet, so only after this
+// many consecutive failures the sensor is probed again with begin(): a sensor
+// that was unplugged, reset or browned out then comes back without a reboot.
+#define SCD30_REINIT_AFTER_FAILURES 5
+static uint8_t scd30_read_failures[N_SCD30] = {0};
+
 void init_scd30(int i2cId) {
   ESP_LOGI(SGO_LOG_NOSEND, "@SCD30 Initializing scd30 i2c device");
 
@@ -52,7 +58,13 @@ void loop_scd30(int i2cId) {
 	if (s->init) {
 		if (!readMeasurement(s)) {
 			set_scd30_present(i2cId, 0);
+			if (++scd30_read_failures[i2cId] >= SCD30_REINIT_AFTER_FAILURES) {
+				ESP_LOGW(SGO_LOG_NOSEND, "@SCD30 %d consecutive read failures on i2c %d, re-initializing", scd30_read_failures[i2cId], i2cId);
+				s->init = false;
+				scd30_read_failures[i2cId] = 0;
+			}
 		} else {
+			scd30_read_failures[i2cId] = 0;
       // TODO DRY this with sht21 code
       float asvp = 610.78 * powf(2.71828, (float)s->temperature / (float)(s->temperature + 238.3) * 17.2694);
 
