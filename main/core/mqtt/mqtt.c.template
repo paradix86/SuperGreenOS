@@ -39,6 +39,10 @@
 
 bool connected = false;
 
+bool get_mqtt_connected() {
+  return connected;
+}
+
 <% if (hasCmd) { %>
 #include "<%= modules.mqtt.fields.cmdcallbackinclude.default %>"
 <% } %>

@@ -49,7 +49,7 @@ static void sgl_task(void *param) {
 
   while (true) {
 
-    if (connected) {
+    if (get_mqtt_connected()) {
       for (int i = 0; i < CMD_COUNT; ++i) {
         if (updateFns[i] != NULL) {
           updateFns[i]();

@@ -27,6 +27,7 @@
 
 #include "../kv/kv.h"
 #include "../log/log.h"
+#include "../mqtt/mqtt.h"
 
 #define IS_URI_SEP(c) (c == '?' || c == '&' || c == '=')
 #define MQTT_DIAG_KEY_STAGE "MQTT_STG"
@@ -297,7 +298,9 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   int32_t mqtt_disc_idx = hasi32(MQTT_DIAG_KEY_DISC_IDX) ? geti32(MQTT_DIAG_KEY_DISC_IDX) : -1;
   int state = get_state();
   int wifi_status = get_wifi_status();
+  int mqtt_connected = get_mqtt_connected() ? 1 : 0;
   int n_restarts = get_n_restarts();
+  int ota_status = get_ota_status();
   char broker_url[MAX_KVALUE_SIZE] = {0};
   char broker_clientid[MAX_KVALUE_SIZE] = {0};
   char ret[1024] = {0};
@@ -307,13 +310,16 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
 
   snprintf(ret, sizeof(ret),
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
-      "\"wifi_status\":%d,\"n_restarts\":%d,\"broker_url\":\"%s\","
+      "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
+      "\"ota_status\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
       (long)mqtt_disc_idx,
       state,
       wifi_status,
+      mqtt_connected,
       n_restarts,
+      ota_status,
       broker_url,
       broker_clientid);
 

@@ -36,6 +36,10 @@
 
 bool connected = false;
 
+bool get_mqtt_connected() {
+  return connected;
+}
+
 
 #include "../cmd/cmd.h"
 

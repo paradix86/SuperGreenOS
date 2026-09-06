@@ -28,7 +28,7 @@
   const hasScr = modules.mqtt.fields.scrcallbackinclude.default && modules.mqtt.fields.scrcallback.default
 %>
 
-extern bool connected;
+bool get_mqtt_connected();
 
 void init_mqtt();
 void mqtt_intercept_log();

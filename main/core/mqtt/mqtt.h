@@ -25,7 +25,7 @@
 
 
 
-extern bool connected;
+bool get_mqtt_connected();
 
 void init_mqtt();
 void mqtt_intercept_log();
@@ -35,3 +35,4 @@ void mqtt_publish_ha_state();
 
 
 #endif
+
