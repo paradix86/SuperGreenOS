@@ -167,6 +167,16 @@ static void set_ip(tcpip_adapter_if_t interface) {
   set_wifi_ip(ip);
 }
 
+// event_handler() runs in the system event task with no wait budget: a queue
+// full of unconsumed commands (wifi_task busy, or a burst of AP connect/
+// disconnect churn against the 5-slot queue) silently drops the event
+// otherwise, which is exactly what previously let n_connected_sta drift.
+static void send_wifi_cmd(wifi_cmd c, const char *name) {
+  if (xQueueSend(cmd, &c, 0) != pdTRUE) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@WIFI cmd queue full, dropped %s", name);
+  }
+}
+
 static esp_err_t event_handler(void *ctx, system_event_t *event) {
   switch(event->event_id) {
     case SYSTEM_EVENT_STA_START:
@@ -178,7 +188,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event) {
     case SYSTEM_EVENT_STA_GOT_IP:
       ESP_LOGI(SGO_LOG_NOSEND, "@WIFI SYSTEM_EVENT_STA_GOT_IP");
       xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-      xQueueSend(cmd, &CMD_STA_CONNECTED, 0);
+      send_wifi_cmd(CMD_STA_CONNECTED, "CMD_STA_CONNECTED");
       set_wifi_status(CONNECTED);
       on_wifi_status_changed();
       set_ip(TCPIP_ADAPTER_IF_STA);
@@ -187,29 +197,29 @@ static esp_err_t event_handler(void *ctx, system_event_t *event) {
       ESP_LOGI(SGO_LOG_NOSEND, "@WIFI SYSTEM_EVENT_STA_DISCONNECTED = %d", event->event_info.disconnected.reason);
       bool failed = event->event_info.disconnected.reason == WIFI_REASON_NO_AP_FOUND || event->event_info.disconnected.reason == WIFI_REASON_AUTH_FAIL;
       if (failed) {
-        xQueueSend(cmd, &CMD_STA_CONNECTION_FAILED, 0);
+        send_wifi_cmd(CMD_STA_CONNECTION_FAILED, "CMD_STA_CONNECTION_FAILED");
         set_wifi_status(FAILED);
         on_wifi_status_changed();
       } else {
-        xQueueSend(cmd, &CMD_STA_DISCONNECTED, 0);
+        send_wifi_cmd(CMD_STA_DISCONNECTED, "CMD_STA_DISCONNECTED");
         set_wifi_status(DISCONNECTED);
         on_wifi_status_changed();
       }
       xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
       break;
     case SYSTEM_EVENT_AP_START:
-      xQueueSend(cmd, &CMD_AP_START, 0);
+      send_wifi_cmd(CMD_AP_START, "CMD_AP_START");
       set_wifi_status(AP);
       on_wifi_status_changed();
       set_ip(TCPIP_ADAPTER_IF_AP);
       break;
     case SYSTEM_EVENT_AP_STACONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@WIFI SYSTEM_EVENT_AP_STACONNECTED");
-      xQueueSend(cmd, &CMD_AP_STACONNECTED, 0);
+      send_wifi_cmd(CMD_AP_STACONNECTED, "CMD_AP_STACONNECTED");
       break;
     case SYSTEM_EVENT_AP_STADISCONNECTED:
       ESP_LOGI(SGO_LOG_NOSEND, "@WIFI SYSTEM_EVENT_AP_STADISCONNECTED");
-      xQueueSend(cmd, &CMD_AP_STADISCONNECTED, 0);
+      send_wifi_cmd(CMD_AP_STADISCONNECTED, "CMD_AP_STADISCONNECTED");
       break;
     default:
       break;
@@ -238,7 +248,11 @@ static bool try_sta_connection() {
 static void wifi_task(void *param) {
   unsigned int c;
   unsigned int n_connection_failed = 0;
-  unsigned int n_connected_sta = 0;
+  // signed and clamped at 0: event_handler()'s xQueueSend calls are best-effort
+  // (queue depth 5, no wait), so a lost CMD_AP_STACONNECTED under bursty
+  // connect/disconnect traffic must not wrap this into a huge unsigned value
+  // and permanently block the AP->STA fallback below.
+  int n_connected_sta = 0;
   unsigned int counter = 1;
   bool was_valid = is_valid();
 
@@ -283,7 +297,9 @@ static void wifi_task(void *param) {
         ++n_connected_sta;
       } else if (c == CMD_AP_STADISCONNECTED) {
         ESP_LOGI(SGO_LOG_NOSEND, "@WIFI CMD_AP_STADISCONNECTED");
-        --n_connected_sta;
+        if (n_connected_sta > 0) {
+          --n_connected_sta;
+        }
 
       // STA connection stopped
       } else if (c == CMD_STA_CONNECTION_FAILED || c == CMD_STA_DISCONNECTED) {
