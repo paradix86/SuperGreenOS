@@ -14,7 +14,7 @@ This folder is the operational documentation home for `SuperGreenOS`.
 
 ## What is currently proven
 
-- ESP-IDF `3.3.1` legacy `make` build works on modern Ubuntu when generation order is respected.
+- ESP-IDF `3.3.1` legacy `make` build works on modern Ubuntu and on WSL2 Ubuntu 22.04 when generation order is respected (`scripts/build.sh` encodes it; `setup/setup_supergreenos_build_env.sh` bootstraps the toolchain).
 - The required generation order is:
   1. `update_config.sh`
   2. `update_templates.sh`

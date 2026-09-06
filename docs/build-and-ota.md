@@ -4,7 +4,19 @@ This document describes the **current validated build flow** and the **practical
 
 ## 1. Required generation/build flow
 
-Always regenerate first:
+One-shot (runs the whole flow below, verified on WSL Ubuntu 22.04 in 59 s):
+
+```bash
+scripts/build.sh                 # Controller v2.1: CUE -> JSON -> templates -> UI -> make
+scripts/build.sh --gen-only      # generation only (also works on Windows Git Bash)
+scripts/build.sh --skip-config   # reuse the committed config.controller.json (no cue needed)
+SGOS_BUILD_DIR=/root/sgos-build scripts/build.sh   # native build dir when the repo is on /mnt/c
+```
+
+The generation scripts now fail loudly: a missing `ejs-cli`/`cue` or a failed render no
+longer leaves 0-byte generated sources behind.
+
+Manual equivalent:
 
 ```bash
 cd /home/alan/sources/SuperGreenOS
@@ -22,6 +34,15 @@ make -j4
 ```
 
 If this order is skipped, the build can fail with missing generated scaffold symptoms such as `undefined reference to app_main`.
+
+`config.controller.json` is committed for convenience (UI testing without `cue`), but it is a
+generated file: regenerate and commit it whenever the CUE sources change. Before 2026-09-06 the
+committed copy was a stale `Controller/v3` export without the `sensor_health` module, which
+made `mqtt.c` fail to link unless `update_config.sh` was run first.
+
+Profile note: `Controller/v2.1` and `Controller/v3` only differ in defaults
+(`MOTOR_N_MIN` 0 vs 8, `MOTORS_CURVE` 1 vs 0, `OTA_BASEDIR` `/ControllerV2.1` vs `/ControllerV3`,
+and whether `MOTOR_N_FREQUENCY` is an NVS key). Defaults only apply to keys missing from NVS.
 
 ## 2. Maintenance packaging reality
 

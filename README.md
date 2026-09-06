@@ -166,7 +166,7 @@ cue version 0.0.8 darwin/amd64
 
 # Modern Linux Notes
 
-This repository was successfully built and deployed via OTA from a modern Ubuntu machine in March 2026, but only after a few compatibility fixes for legacy ESP-IDF `3.3.1`.
+This repository was successfully built and deployed via OTA from a modern Ubuntu machine in March 2026, but only after a few compatibility fixes for legacy ESP-IDF `3.3.1`. Since September 2026 the same build is reproducible on WSL2 Ubuntu 22.04 with `setup/setup_supergreenos_build_env.sh` (toolchain bootstrap) and `scripts/build.sh` (generation + make in one step); see `docs/environment-setup.md` and `docs/build-and-ota.md`.
 
 ## Important
 
