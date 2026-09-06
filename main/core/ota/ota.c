@@ -300,6 +300,13 @@ static void try_ota(const char *new_timestamp)
     close(socket_id);
     return;
   }
+  // Without a receive timeout a download that stalls on a silent connection
+  // blocks recv() forever, and with it ota_task and every later OTA request.
+  if (!set_socket_recv_timeout(socket_id, OTA_RECV_TIMEOUT_S)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@OTA Failed to set download socket timeout");
+    close(socket_id);
+    return;
+  }
 
   /*send GET request to http server*/
   const char *GET_FORMAT =
