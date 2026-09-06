@@ -55,7 +55,7 @@ static QueueHandle_t cmd;
 static QueueHandle_t log_queue;
 
 static int CMD_MQTT_CONNECTED = 1;
-static int CMD_MQTT_FORCE_FLUSH = 2;
+
 
 #define HA_TOPIC_PREFIX "supergreen"
 #define HA_DISCOVERY_PREFIX "homeassistant"
