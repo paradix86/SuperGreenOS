@@ -16,28 +16,42 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-DATA="$1"
+# Renders every *.template under DIR (default: main) with ejs-cli, using the
+# generated config JSON as data model. Output is written to a temp file and
+# moved into place only on success, so a missing/failing ejs-cli can never
+# leave 0-byte generated sources behind.
 
-if [ ! -f "$DATA" ]; then
-  echo "USAGE: $0 /path/to/config.json"
-  exit
+set -euo pipefail
+
+DATA="${1:-}"
+DIR="${2:-main}"
+
+if [ -z "$DATA" ] || [ ! -f "$DATA" ]; then
+  echo "USAGE: $0 /path/to/config.json [dir]" >&2
+  exit 1
 fi
 
-DIR="main"
-
-if [ "$#" -eq 2 ]; then
-  DATA="$1"
-  DIR="$2"
+if ! command -v ejs-cli >/dev/null 2>&1; then
+  echo "ERROR: ejs-cli not found in PATH (install with: npm install -g ejs-cli)" >&2
+  exit 1
 fi
 
 GREEN="\033[0;32m"
+RED="\033[0;31m"
 NC="\033[0m"
-for i in $(find $DIR -name '*.template')
-do
-  #if [ ${i: -11} == ".c.template" ] || [ ${i: -11} == ".h.template" ]; then
-  #  ejs-cli -O $DATA -f $i | clang-format > "${i/.template/}"
-  #else
-    ejs-cli -O $DATA -f $i > "${i/.template/}"
-  #fi
-  echo -e "Processing $i: ${GREEN}Done${NC}"
-done
+status=0
+
+while IFS= read -r -d '' template; do
+  out="${template%.template}"
+  tmp="$(mktemp "${out}.tmp.XXXXXX")"
+  if ejs-cli -O "$DATA" -f "$template" > "$tmp" && [ -s "$tmp" ]; then
+    mv -f "$tmp" "$out"
+    echo -e "Processing $template: ${GREEN}Done${NC}"
+  else
+    rm -f "$tmp"
+    echo -e "Processing $template: ${RED}FAILED${NC} (existing output left untouched)" >&2
+    status=1
+  fi
+done < <(find "$DIR" -name '*.template' -print0 | sort -z)
+
+exit $status

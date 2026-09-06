@@ -6,15 +6,40 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: espressif/idf:release-v3.3
+    # Same ESP-IDF as docs/environment-setup.md (tag v3.3.1 == commit 143d26aa).
+    container: espressif/idf:v3.3.1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # git describe needs the tags for the firmware provenance string
+          fetch-depth: 0
+
+      - name: Set up Node.js (for ejs-cli)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install generation tools (ejs-cli, cue 0.0.8)
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          npm install -g ejs-cli
+          curl -fsSL -o /tmp/cue.tgz https://github.com/cue-lang/cue/releases/download/v0.0.8/cue_0.0.8_Linux_x86_64.tar.gz
+          echo "34ac356ebd0d6cd44811b491dc796c897b528b6b973f03db742cba88fe682227  /tmp/cue.tgz" | sha256sum -c -
+          tar -xzf /tmp/cue.tgz -C /usr/local/bin cue
+          cue version
+
+      - name: Regenerate sources and UI
+        run: |
+          bash scripts/build.sh --gen-only
+          # build_maintenance_ota.sh refuses a dirty tree: the committed config JSON and
+          # spiffs_fs payloads must match what the CUE/EJS sources generate.
+          git diff --exit-code -- config.controller.json spiffs_fs/
 
       - name: Build Maintenance Firmware
         run: |
-          chmod +x scripts/build_maintenance_ota.sh
-          ./scripts/build_maintenance_ota.sh
+          . "$IDF_PATH/export.sh"
+          bash scripts/build_maintenance_ota.sh
           test -f releases/SuperGreenMaintenance/last_timestamp
 
       - name: Upload Artifact
