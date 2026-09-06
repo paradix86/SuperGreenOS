@@ -25,6 +25,7 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <nvs.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
@@ -311,6 +312,10 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   unsigned long heap_free = (unsigned long)esp_get_free_heap_size();
   unsigned long heap_min_free = (unsigned long)esp_get_minimum_free_heap_size();
   long uptime_s = (long)(esp_timer_get_time() / 1000000LL);
+  int32_t mqtt_stack_hwm = get_mqtt_stack_hwm();
+  time_t now_s = 0;
+  time(&now_s);
+  int time_valid = now_s >= 1500000000 ? 1 : 0;  // clock past 2017 = NTP or NVS seed applied
   nvs_stats_t nvs_stats = {0};
   if (nvs_get_stats(NULL, &nvs_stats) != ESP_OK) {
     nvs_stats.used_entries = 0;
@@ -328,7 +333,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"heap_free\":%lu,"
       "\"heap_min_free\":%lu,\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
-      "\"broker_url\":\"%s\","
+      "\"mqtt_stack_hwm\":%ld,\"time_valid\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
       (long)mqtt_disc_idx,
@@ -343,6 +348,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       uptime_s,
       (unsigned int)nvs_stats.used_entries,
       (unsigned int)nvs_stats.free_entries,
+      (long)mqtt_stack_hwm,
+      time_valid,
       broker_url,
       broker_clientid);
 

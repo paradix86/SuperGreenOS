@@ -35,7 +35,8 @@
 
 
 
-bool connected = false;
+// written by the esp-mqtt client task, read by mqtt_task and HTTP handlers
+static volatile bool connected = false;
 
 bool get_mqtt_connected() {
   return connected;
@@ -52,9 +53,9 @@ bool get_mqtt_connected() {
 static esp_mqtt_client_handle_t client;
 
 static QueueHandle_t cmd;
-static QueueHandle_t log_queue;
 
 static int CMD_MQTT_CONNECTED = 1;
+static int CMD_MQTT_PUBLISH_STATE = 3;
 
 
 #define HA_TOPIC_PREFIX "supergreen"
@@ -64,10 +65,16 @@ static int CMD_MQTT_CONNECTED = 1;
 #define MQTT_DISCOVERY_CONNECT_COOLDOWN_MS 2000
 #define DIAG_PUBLISH_PERIOD_MS (5 * 60 * 1000)
 
-#define MAX_LOG_QUEUE_ITEMS 25
 #define MQTT_DIAG_KEY_STAGE "MQTT_STG"
 #define MQTT_DIAG_KEY_DISC_IDX "MQTT_DIDX"
-#define MQTT_DIAG_KEY_STACK_HWM "MQTT_HWM"
+
+// Stack high-water mark of mqtt_task, RAM only: it used to be committed to NVS
+// on every loop iteration (every 10 s, ~8k flash writes a day) and never read.
+static volatile int32_t mqtt_stack_hwm = -1;
+
+int32_t get_mqtt_stack_hwm() {
+  return mqtt_stack_hwm;
+}
 
 typedef enum {
   MQTT_STATE_DIAG_NONE = 0,
@@ -629,6 +636,12 @@ static void subscribe_cmd() {
   esp_mqtt_client_subscribe(client, topic, 1);
 }
 
+static void mqtt_request_state_publish() {
+  if (cmd == NULL || xQueueSend(cmd, &CMD_MQTT_PUBLISH_STATE, 0) != pdTRUE) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@MQTT state publish request dropped (queue full)");
+  }
+}
+
 static void parse_ha_command(esp_mqtt_event_handle_t event) {
   char topic[MAX_KVALUE_SIZE] = {0};
   char payload[64] = {0};
@@ -671,7 +684,7 @@ static void parse_ha_command(esp_mqtt_event_handle_t event) {
     } else if (strcmp(payload, "OFF") == 0 || strcmp(payload, "0") == 0 || strcmp(payload, "false") == 0) {
       set_sensor_health_enabled(0);
     }
-    mqtt_publish_ha_state();
+    mqtt_request_state_publish();
     return;
   }
 
@@ -680,7 +693,7 @@ static void parse_ha_command(esp_mqtt_event_handle_t event) {
     int period = atoi(payload);
     if (period >= 5 && period <= 3600) {
       set_sensor_health_period_s((uint16_t)period);
-      mqtt_publish_ha_state();
+      mqtt_request_state_publish();
     }
   }
 }
@@ -851,7 +864,7 @@ static void mqtt_task(void *param) {
 
 
   while(true) {
-    seti32(MQTT_DIAG_KEY_STACK_HWM, (int32_t)uxTaskGetStackHighWaterMark(NULL));
+    mqtt_stack_hwm = (int32_t)uxTaskGetStackHighWaterMark(NULL);
     if (xQueueReceive(cmd, &c, 10000 / portTICK_PERIOD_MS)) {
       if (c == CMD_MQTT_CONNECTED) {
         mqtt_diag_set_stage(MQTT_DIAG_STAGE_CONNECTED);
@@ -887,6 +900,13 @@ static void mqtt_task(void *param) {
           mqtt_publish_ha_state_diag(state_diag_mode, client_id);
           mqtt_diag_set_stage(MQTT_DIAG_STAGE_STATE_ON_CONNECT);
         }
+      } else if (c == CMD_MQTT_PUBLISH_STATE) {
+        // requested from the esp-mqtt event callback (HA command): publish from
+        // this task instead of from inside the client's own event dispatch
+        if (connected && state_diag_mode == MQTT_STATE_DIAG_NONE) {
+          mqtt_publish_ha_state();
+          last_ha_publish = xTaskGetTickCount();
+        }
       } 
     }
     if (was_connected && !connected) {
@@ -918,11 +938,7 @@ static int mqtt_logging_vprintf(const char *str, va_list l) {
 
 
 void mqtt_intercept_log() {
-  log_queue = xQueueCreate(MAX_LOG_QUEUE_ITEMS, MAX_QUEUE_ITEM_SIZE);
-  if (log_queue == NULL) {
-    ESP_LOGE(SGO_LOG_NOSEND, "@MQTT Unable to create mqtt log queue");
-  }
-
+  // the 3.2 KB log queue that used to be created here was never read
   esp_log_set_vprintf(mqtt_logging_vprintf);
 }
 

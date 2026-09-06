@@ -20,12 +20,14 @@
 #define MQTT_H_
 
 #include "stdbool.h"
+#include <stdint.h>
 
 #define MAX_QUEUE_ITEM_SIZE 128
 
 
 
 bool get_mqtt_connected();
+int32_t get_mqtt_stack_hwm();
 
 void init_mqtt();
 void mqtt_intercept_log();
