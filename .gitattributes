@@ -1,2 +1,15 @@
+# Normalize every text file to LF in the working tree, regardless of core.autocrlf.
+# The build runs from WSL/Linux on this checkout: CRLF in Makefile, sdkconfig,
+# *.sh, *.cue and *.template breaks make, kconfig and bash.
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.gif binary
+*.bin binary
+*.gz binary
+
+# Legacy exception kept from upstream (m5tft font pipeline expects CRLF)
 main/m5tft/utils/characters/**/*.svg text eol=crlf
 main/m5tft/utils/characters/**/config.yml text eol=crlf
