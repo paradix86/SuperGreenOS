@@ -21,7 +21,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include "nvs_flash.h"
 #include "esp_system.h"
 
 #include "../log/log.h"
@@ -35,11 +34,6 @@ static QueueHandle_t cmd;
 
 static void autoreboot_task();
 static void reboot_task();
-
-static void reset_nvs() {
-  ESP_ERROR_CHECK(nvs_flash_erase());
-  esp_restart();
-}
 
 void reset_on_next_reboot() {
   seti8(N_SHORT_REBOOTS, MAX_SHORT_REBOOTS);
