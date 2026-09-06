@@ -29,31 +29,17 @@
 #include "../core/log/log.h"
 #include "../core/kv/kv.h"
 #include "../motor/motor.h"
+#include "../core/ref_source.h"
+#include "esp_task_wdt.h"
 
 #define max(x, y) (((x) > (y)) ? (x) : (y))
 #define min(x, y) (((x) < (y)) ? (x) : (y))
 
 
-// The indirect sensor source for *_REF encodes both sensor kind and i2c port
-// (see fan.cue/blower.cue and the generated indir helpers); box timer output
-// (8/9/10) isn't sensor-backed and is always considered fresh. When the
-// selected sensor is absent (never connected, or scd30.c's re-probe kicked
-// in after repeated read failures) the *_REF value is whatever was last read
-// and never updated again, so the duty below would silently freeze forever.
-// Default here favors ventilation (max duty) since trapped heat/humidity is
-// generally the bigger risk for a grow box than a bit of extra airflow;
-// flip this if that assumption doesn't hold for your setup.
-static bool is_ref_source_absent(int source) {
-  if (source >= 1 && source <= 3)   return !get_sht21_present(source - 1);
-  if (source >= 15 && source <= 17) return !get_sht21_present(source - 15);
-  if (source >= 23 && source <= 25) return !get_sht21_present(source - 23);
-  if (source >= 30 && source <= 32) return !get_scd30_present(source - 30);
-  if (source >= 37 && source <= 39) return !get_scd30_present(source - 37);
-  if (source >= 44 && source <= 46) return !get_scd30_present(source - 44);
-  if (source >= 50 && source <= 52) return !get_scd30_present(source - 50);
-  return false;  // box timer output (8/9/10) or an unmapped source
-}
-
+// is_ref_source_absent() lives in ../core/ref_source.h (shared with
+// blower.c/valve.c). Default here favors ventilation (max duty) since trapped
+// heat/humidity is generally the bigger risk for a grow box than a bit of
+// extra airflow; flip this if that assumption doesn't hold for your setup.
 
 // Percentage points per loop iteration (~10s steady state, faster if a
 // setting change triggers an immediate refresh): an instant 20->100 jump on
@@ -76,7 +62,9 @@ typedef enum {
 
 static void fan_task(void *param) {
   fan_cmd c = CMD_NO_ACTION;
+  esp_task_wdt_add(NULL);
   while (1) {
+    esp_task_wdt_reset();
     for (int i = 0; i < N_BOX; ++i) {
       if (get_box_enabled(i) != 1) continue;
       int vmin = get_box_fan_min(i);

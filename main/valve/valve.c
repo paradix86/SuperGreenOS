@@ -21,23 +21,15 @@
 
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
+#include "../core/ref_source.h"
+#include "esp_task_wdt.h"
 
 static void valve_task(void *param);
 
-// See fan.c/blower.c for the same helper: the indirect sensor source encodes
-// both sensor kind and i2c port; box timer output (8/9/10) isn't sensor-backed.
-// Unlike fan/blower (favor ventilation), a valve fails CLOSED when its sensor
-// is absent: an unmonitored solenoid left open can flood or over-dose CO2.
-static bool is_ref_source_absent(int source) {
-  if (source >= 1 && source <= 3)   return !get_sht21_present(source - 1);
-  if (source >= 15 && source <= 17) return !get_sht21_present(source - 15);
-  if (source >= 23 && source <= 25) return !get_sht21_present(source - 23);
-  if (source >= 30 && source <= 32) return !get_scd30_present(source - 30);
-  if (source >= 37 && source <= 39) return !get_scd30_present(source - 37);
-  if (source >= 44 && source <= 46) return !get_scd30_present(source - 44);
-  if (source >= 50 && source <= 52) return !get_scd30_present(source - 50);
-  return false;  // box timer output (8/9/10) or an unmapped source
-}
+// is_ref_source_absent() lives in ../core/ref_source.h (shared with
+// fan.c/blower.c). Unlike fan/blower (favor ventilation), a valve fails
+// CLOSED when its sensor is absent: an unmonitored solenoid left open can
+// flood or over-dose CO2.
 
 static bool is_on() {
   int src = get_valve_ref_on_source();
@@ -69,7 +61,9 @@ void init_valve() {
 
 static void valve_task(void *param) {
   int i = 0;
+  esp_task_wdt_add(NULL);
   while (true) {
+    esp_task_wdt_reset();
     enum valve_mode mode = get_valve_mode();
     int ref_source = get_valve_ref_source();
     bool enabled = mode != VALVE_DISABLED && ref_source != 0 && !is_ref_source_absent(ref_source);
