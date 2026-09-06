@@ -31,6 +31,7 @@
 #include "../kv/kv.h"
 #include "../wifi/wifi.h"
 #include "../ota/ota.h"
+#include "../reboot/reboot.h"
 
 <%
   const hasCmd = modules.mqtt.fields.cmdcallbackinclude.default && modules.mqtt.fields.cmdcallback.default
@@ -752,7 +753,8 @@ static void parse_ha_command(esp_mqtt_event_handle_t event) {
   build_ha_command_topic(expected, sizeof(expected), client_id, "reboot");
   if (strcmp(topic, expected) == 0) {
     if (strcmp(payload, "PRESS") == 0) {
-      set_reboot(1);
+      ESP_LOGI(SGO_LOG_NOSEND, "@MQTT Reboot requested via Home Assistant");
+      reboot_esp();
     }
     return;
   }
