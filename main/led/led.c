@@ -36,6 +36,7 @@
 #define max(a, b) (((a) > (b)) ? (a) : (b)) 
 
 #define LED_MIN_ZERO           5
+#define SUNGLASSES_DURATION_S  1200
 #define LED_DUTY_RESOLUTION    10
 #define LED_MIN_DUTY           0
 #define LED_MAX_DUTY           pow(2, LED_DUTY_RESOLUTION)
@@ -75,7 +76,9 @@ static void update_led(int i) {
   bool is_sunglasses_mode = false;
   if (box != -1) {
     int box_led_dim = get_box_led_dim(box);
-    is_sunglasses_mode = now - box_led_dim < 1200;
+    // BOX_N_LED_DIM holds the epoch of the last "sunglasses" request (0 = never).
+    // Guard against an unset clock: after an NVS erase time() is ~0 until NTP syncs.
+    is_sunglasses_mode = box_led_dim > 0 && now >= box_led_dim && now - box_led_dim < SUNGLASSES_DURATION_S;
   }
   if (get_led_fade(i) == 1) {
     if (is_sunglasses_mode) {
@@ -146,6 +149,16 @@ void init_led() {
       duty:        0,
     };
     ledc_channel_config(&channel_config);
+  }
+
+  // LED_N_DUTY is persisted in NVS; a box that was disabled before the reboot
+  // must not come back with its old duty until the box is enabled again.
+  for (int i = 0; i < N_LED; ++i) {
+    int box = get_led_box(i);
+    if (box != -1 && get_box_enabled(box) != 1 && get_led_duty(i) != 0) {
+      ESP_LOGI(SGO_LOG_NOSEND, "@LED led %d belongs to disabled box %d, clearing persisted duty", i, box);
+      set_led_duty(i, 0);
+    }
   }
 
   cmd = xQueueCreate(10, sizeof(cmd_refresh_led));
