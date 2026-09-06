@@ -2289,7 +2289,7 @@
                         "enable": true,
                         "manual": false
                     },
-                    "write_cb": false,
+                    "write_cb": true,
                     "remote": true,
                     "type": "string",
                     "nosend": true,

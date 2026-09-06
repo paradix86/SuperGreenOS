@@ -113,7 +113,17 @@ static void start_ap() {
   esp_wifi_stop();
 
   wifi_config_t wifi_config = {0};
-  wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  size_t pass_len = strlen(password);
+  // esp_wifi_set_config() aborts via ESP_ERROR_CHECK below if a WPA2 password
+  // is set but outside 8-63 chars; on_set_wifi_ap_password() should already
+  // reject that over HTTP, but an old/short value already in NVS (upgrade,
+  // manual NVS edit) must not brick the device the next time AP mode starts.
+  wifi_config.ap.authmode = (pass_len == 0) ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+  if (pass_len != 0 && (pass_len < 8 || pass_len > 63)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@WIFI Stored AP password has invalid length %u, falling back to default", (unsigned int)pass_len);
+    strncpy(password, DEFAULT_AP_PASSWORD, sizeof(password) - 1);
+    wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  }
   wifi_config.ap.max_connection = 1;
   memcpy(wifi_config.ap.ssid, ssid, sizeof(wifi_config.ap.ssid));
   memcpy(wifi_config.ap.password, password, sizeof(wifi_config.ap.password));
@@ -312,6 +322,23 @@ const char *on_set_wifi_ssid(const char *ssid) {
 
 const char *on_set_wifi_password(const char *pass) {
   xQueueSend(cmd, &CMD_PASS_CHANGED, 0);
+  return pass;
+}
+
+const char *on_set_wifi_ap_password(const char *pass) {
+  // WIFI_AUTH_WPA2_PSK (used unconditionally by start_ap() for a non-empty
+  // password) requires 8-63 chars; esp_wifi_set_config() would otherwise
+  // ESP_ERROR_CHECK-abort the next time AP mode starts, rebooting into the
+  // same bad value forever. Reject bad lengths here by keeping the previously
+  // stored value instead: the write_cb contract requires a non-NULL string
+  // (the generated setter's assert(strlen(value)...) does not tolerate NULL).
+  static char kept[MAX_KVALUE_SIZE];
+  size_t len = strlen(pass);
+  if (len != 0 && (len < 8 || len > 63)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@WIFI Rejected AP password: must be empty (open) or 8-63 chars, got %u", (unsigned int)len);
+    get_wifi_ap_password(kept, sizeof(kept) - 1);
+    return kept;
+  }
   return pass;
 }
 

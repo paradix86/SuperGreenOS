@@ -30,6 +30,7 @@ modules wifi fields ap_password: _STRING & _NVS & _HTTP_RW & {
   nosend: true
   nvs key: "WAPPASS"
   _default_var: "DEFAULT_AP_PASSWORD"
+  write_cb: true
 }
 
 modules wifi fields mdns_domain: _STRING & _NVS & _HTTP_RW & {
