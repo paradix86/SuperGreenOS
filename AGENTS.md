@@ -78,7 +78,7 @@ Implemented on this branch (build-verified, not yet hardware-tested):
 
 - `OTA_START` is released to `0` by `ota_task` once the request is handled; read `OTA_STATUS` for the outcome (`0` idle/up-to-date, `1` in progress, `2` disabled, `3` failed)
 - a new `OTA_START=1` while a previous request is still queued or running is logged and ignored (`OTA_START` stays `1`), so a double click or a Home Assistant retry cannot queue a second update
-- `/mqttdiag` reports `mqtt_connected`, `ota_status`, `reset_reason` (esp_reset_reason_t of the current boot: 1 power-on, 3 software, 4 panic, 5/6/7 watchdogs, 9 brownout), `heap_free`, `heap_min_free` and `uptime_s`
+- `/mqttdiag` reports `mqtt_connected`, `ota_status`, `reset_reason` (esp_reset_reason_t of the current boot: 1 power-on, 3 software, 4 panic, 5/6/7 watchdogs, 9 brownout), `heap_free`, `heap_min_free`, `uptime_s`, `nvs_used`/`nvs_free` (NVS entries on the 16 KB partition), `mqtt_stack_hwm` (bytes) and `time_valid` (clock past 2017)
 
 ## Frozen runbooks
 

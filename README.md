@@ -226,6 +226,17 @@ Verified timestamps include:
 - `1773757485`
 - `1788688715` (2026-09-06, commit d045281, `SGOS_SPIFFS_FORMAT_ONCE=0`, served from a Windows host with `python -m http.server 8091 --directory releases`; UI kept)
 
+## Timezone
+
+Schedules (on/off hours, season curves) run in UTC unless `TIME_TZ` holds a POSIX TZ string.
+For Italy:
+
+```bash
+curl -fsS -X POST "http://192.168.1.104/s?k=TIME_TZ&v=CET-1CEST%2CM3.5.0%2CM10.5.0%2F3"
+```
+
+After setting it, re-enter `BOX_N_ON_HOUR`/`BOX_N_OFF_HOUR` in local time. An empty value restores UTC.
+
 ## Verified OTA over Wi-Fi
 
 Example verified setup:
