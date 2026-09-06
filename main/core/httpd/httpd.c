@@ -321,14 +321,16 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
     nvs_stats.used_entries = 0;
     nvs_stats.free_entries = 0;
   }
-  char broker_url[MAX_KVALUE_SIZE] = {0};
-  char broker_clientid[MAX_KVALUE_SIZE] = {0};
+  // 128 is plenty for a broker URL / client id and keeps this handler's stack
+  // use well inside the HTTP server task; getstr() truncates longer values.
+  char broker_url[128] = {0};
+  char broker_clientid[128] = {0};
   char ret[1024] = {0};
 
   getstr(BROKER_URL, broker_url, sizeof(broker_url) - 1);
   getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
 
-  snprintf(ret, sizeof(ret),
+  int written = snprintf(ret, sizeof(ret),
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"heap_free\":%lu,"
@@ -352,6 +354,9 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       time_valid,
       broker_url,
       broker_clientid);
+  if (written < 0 || (size_t)written >= sizeof(ret)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@HTTPD /mqttdiag JSON truncated (%d bytes)", written);
+  }
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -442,6 +447,8 @@ static void start_webserver_task(void *args) {
   vTaskDelay(1000 / portTICK_PERIOD_MS); // Looks like we have a race confition with wifi
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  // handlers keep MAX_KVALUE_SIZE (517 B) buffers on the stack; the 4 KB default is tight
+  config.stack_size = 6144;
   config.lru_purge_enable = true;
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.max_uri_handlers = 11;
