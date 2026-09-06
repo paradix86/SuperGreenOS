@@ -19,10 +19,13 @@
 #ifndef REBOOT_H_
 #define REBOOT_H_
 
+#include <stddef.h>
+
 void init_reboot();
 
 void reboot_esp();
 void reset_on_next_reboot();
+void get_reset_history(char *dest, size_t len);
 
 int on_set_reboot(int value);
 
