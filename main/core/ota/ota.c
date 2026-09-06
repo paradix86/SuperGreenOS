@@ -25,7 +25,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <sys/time.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -48,6 +50,7 @@
 #define BUFFSIZE 1024
 #define TEXT_BUFFSIZE 1024
 #define OTA_RECV_TIMEOUT_S 5
+#define OTA_CONNECT_TIMEOUT_S 10
 
 #define OTA_BUILD_TIMESTAMP_BCK "O_B_T_BCK"
 
@@ -145,8 +148,31 @@ static bool connect_to_http_server()
   sock_info.sin_addr.s_addr = inet_addr(server_ip);
   sock_info.sin_port = htons(port);
 
-  // connect to http server
+  // connect with a bounded wait: a black-holed server IP otherwise blocks
+  // ota_task in connect() for the full TCP timeout
+  int flags = fcntl(socket_id, F_GETFL, 0);
+  if (flags >= 0) {
+    fcntl(socket_id, F_SETFL, flags | O_NONBLOCK);
+  }
   http_connect_flag = connect(socket_id, (struct sockaddr *)&sock_info, sizeof(sock_info));
+  if (http_connect_flag == -1 && errno == EINPROGRESS) {
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(socket_id, &wfds);
+    struct timeval tv = { .tv_sec = OTA_CONNECT_TIMEOUT_S, .tv_usec = 0 };
+    int sel = select(socket_id + 1, NULL, &wfds, NULL, &tv);
+    int so_error = 0;
+    socklen_t so_len = sizeof(so_error);
+    if (sel > 0 && getsockopt(socket_id, SOL_SOCKET, SO_ERROR, &so_error, &so_len) == 0 && so_error == 0) {
+      http_connect_flag = 0;
+    } else {
+      errno = (sel == 0) ? ETIMEDOUT : (so_error != 0 ? so_error : errno);
+      http_connect_flag = -1;
+    }
+  }
+  if (flags >= 0) {
+    fcntl(socket_id, F_SETFL, flags);
+  }
   if (http_connect_flag == -1) {
     ESP_LOGE(SGO_LOG_NOSEND, "@OTA Connect to server failed! errno=%d", errno);
     close(socket_id);
