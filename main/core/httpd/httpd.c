@@ -81,10 +81,15 @@ int url_decode(const char *s, char *dec)
   for (o = dec; s <= end; o++) {
     c = *s++;
     if (c == '+') c = ' ';
-    else if (c == '%' && (	!ishex(*s++)	||
-          !ishex(*s++)	||
-          !sscanf(s - 2, "%2x", &c)))
-      return -1;
+    else if (c == '%') {
+      // A request cut short right after '%' (e.g. "...&v=abc%") must not read
+      // past the NUL terminator of the caller's buffer: check the two hex
+      // digits are actually there before consuming them.
+      if (end - s < 2 || !ishex(s[0]) || !ishex(s[1]) || !sscanf(s, "%2x", &c)) {
+        return -1;
+      }
+      s += 2;
+    }
 
     if (dec) *o = c;
   }
