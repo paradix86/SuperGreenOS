@@ -264,6 +264,9 @@ static void wifi_task(void *param) {
         n_connected_sta = 0;
       } else if (c == CMD_STA_CONNECTED) {
         ESP_LOGI(SGO_LOG_NOSEND, "@WIFI CMD_STA_CONNECTED");
+        // the retry budget is per outage: without this reset five unrelated
+        // blips spread over weeks were enough to fall back to AP mode
+        n_connection_failed = 0;
         restart_mdns();
       } else if (c == CMD_AP_STACONNECTED) {
         ESP_LOGI(SGO_LOG_NOSEND, "@WIFI CMD_AP_STACONNECTED");
