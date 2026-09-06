@@ -31,6 +31,14 @@
 #include "../kv/kv.h"
 #include "../wifi/wifi.h"
 
+// NVS key that seeds the clock after a reboot without network. Same key the
+// old NVS-backed "time" field used, so devices upgraded in place keep their seed.
+#define TIME_NVS_KEY "TIME"
+#define TIME_TICK_MS 5000
+// Persisting on every tick meant ~17k NVS commits per day (a page erase every
+// ~10 minutes); every 5 minutes is enough for a minute-based schedule.
+#define TIME_PERSIST_EVERY_N_TICKS 60
+
 static void time_task(void *param);
 static void ntp_task(void *param);
 static void setup(void);
@@ -43,25 +51,29 @@ void init_time() {
 }
 
 static void time_task(void *param) {
-  if (hasi32(TIME)) {
-    time_t now = (time_t)get_time();
+  // Seed the clock from the last persisted value so schedules keep working
+  // while the network is down; NTP corrects it as soon as WiFi is up.
+  if (hasi32(TIME_NVS_KEY)) {
+    time_t now = (time_t)geti32(TIME_NVS_KEY);
     struct timeval tv = { .tv_sec = now, .tv_usec = 0 };
     settimeofday(&tv, NULL);
-    BaseType_t ret = xTaskCreatePinnedToCore(ntp_task, "NTP", 4096, NULL, 10, NULL, 1);
-    if (ret != pdPASS) {
-      ESP_LOGE(SGO_LOG_NOSEND, "@TIME Failed to create NTP task");
-    }
-  } else {
-    wait_connected();
-    setup();
   }
+  BaseType_t ret = xTaskCreatePinnedToCore(ntp_task, "NTP", 4096, NULL, 10, NULL, 1);
+  if (ret != pdPASS) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@TIME Failed to create NTP task");
+  }
+  int ticks_since_persist = TIME_PERSIST_EVERY_N_TICKS;
   while(true) {
     time_t now;
     time(&now);
     print_time(SGO_LOG_NOSEND, "TIME", now);
     set_time((int)now);
+    if (++ticks_since_persist >= TIME_PERSIST_EVERY_N_TICKS) {
+      seti32(TIME_NVS_KEY, (int32_t)now);
+      ticks_since_persist = 0;
+    }
 
-    vTaskDelay(5 * 1000 / portTICK_PERIOD_MS);
+    vTaskDelay(TIME_TICK_MS / portTICK_PERIOD_MS);
   }
 }
 

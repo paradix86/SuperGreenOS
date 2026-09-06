@@ -23,9 +23,8 @@
                     "helper": "",
                     "dump_freq": 60,
                     "nvs": {
-                        "enable": true,
-                        "manual": false,
-                        "key": "TIME"
+                        "enable": false,
+                        "manual": false
                     },
                     "ble": {
                         "enable": false
