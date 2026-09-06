@@ -45,6 +45,19 @@ char file_buffer[FILE_BUFSIZE] = {0};
 #define MAX_FILE_SIZE (15*1024)
 #define MAX_FILE_SIZE_STR "15KB"
 
+/* Build FILE_BASE_PATH + uri_path into out. The URI can be up to
+ * CONFIG_HTTPD_MAX_URI_LEN (512) bytes while the path buffer is FILE_PATH_MAX
+ * (47) bytes, so an unbounded strcat smashed the stack; also refuse ".." so a
+ * request cannot escape the SPIFFS root. */
+static bool build_fs_path(char *out, size_t out_len, const char *uri_path)
+{
+  if (uri_path == NULL || strstr(uri_path, "..") != NULL) {
+    return false;
+  }
+  int n = snprintf(out, out_len, "%s%s", FILE_BASE_PATH, uri_path);
+  return n >= 0 && (size_t)n < out_len;
+}
+
 #ifndef SGL_FORCE_SPIFFS_FORMAT_ONCE
 #define SGL_FORCE_SPIFFS_FORMAT_ONCE 0
 #endif
@@ -68,11 +81,11 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req)
   struct dirent *entry;
   struct stat entry_stat;
 
-  /* Retrieve the base path of file storage to construct the full path */
-  strcpy(fullpath, FILE_BASE_PATH);
-
-  /* Concatenate the requested directory path */
-  strcat(fullpath, &(req->uri[3]));
+  if (!build_fs_path(fullpath, sizeof(fullpath), &(req->uri[3]))) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Invalid directory path : %s", req->uri);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+    return ESP_FAIL;
+  }
   dir = opendir(fullpath);
   const size_t entrypath_offset = strlen(fullpath);
 
@@ -90,7 +103,11 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req)
   while ((entry = readdir(dir)) != NULL) {
     entrytype = (entry->d_type == DT_DIR ? "directory" : "file");
 
-    strncpy(fullpath + entrypath_offset, entry->d_name, sizeof(fullpath) - entrypath_offset);
+    int entry_len = snprintf(fullpath + entrypath_offset, sizeof(fullpath) - entrypath_offset, "%s", entry->d_name);
+    if (entry_len < 0 || (size_t)entry_len >= sizeof(fullpath) - entrypath_offset) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@FS Entry name too long, skipped : %s", entry->d_name);
+      continue;
+    }
     if (stat(fullpath, &entry_stat) == -1) {
       ESP_LOGE(SGO_LOG_NOSEND, "Failed to stat %s : %s", entrytype, entry->d_name);
       continue;
@@ -160,11 +177,11 @@ static esp_err_t http_resp_file(httpd_req_t *req)
   FILE *fd = NULL;
   struct stat file_stat;
 
-  /* Retrieve the base path of file storage to construct the full path */
-  strcpy(filepath, FILE_BASE_PATH);
-
-  /* Concatenate the requested file path */
-  strcat(filepath, &(req->uri[3]));
+  if (!build_fs_path(filepath, sizeof(filepath), &(req->uri[3]))) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Invalid file path : %s", req->uri);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+    return ESP_FAIL;
+  }
   ESP_LOGI(SGO_LOG_NOSEND, "http_resp_file %s", filepath);
   if (stat(filepath, &file_stat) == -1) {
     ESP_LOGE(SGO_LOG_NOSEND, "Failed to stat file : %s", filepath);
@@ -260,11 +277,11 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     return ESP_FAIL;
   }
 
-  /* Retrieve the base path of file storage to construct the full path */
-  strcpy(filepath, FILE_BASE_PATH);
-
-  /* Concatenate the requested file path */
-  strcat(filepath, filename);
+  if (!build_fs_path(filepath, sizeof(filepath), filename)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Invalid file path : %s", filename);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+    return ESP_FAIL;
+  }
   /* On legacy SPIFFS builds, replacing an existing file via fopen("w")
    * can fail after OTA. Remove the old file first so the create path is
    * deterministic for config.json/app.html refreshes. */
@@ -372,8 +389,11 @@ esp_err_t delete_post_handler(httpd_req_t *req)
     return ESP_FAIL;
   }
 
-  strcpy(filepath, FILE_BASE_PATH);
-  strcat(filepath, filename);
+  if (!build_fs_path(filepath, sizeof(filepath), filename)) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS Invalid file path : %s", filename);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+    return ESP_FAIL;
+  }
 
   if (unlink(filepath) != 0) {
     ESP_LOGE(SGO_LOG_NOSEND, "@FS Failed to delete file : %s", filepath);
