@@ -244,7 +244,37 @@ bool hasstr(const char * key) {
 }
 
 void getstr(const char * key, char *value, size_t length) {
-  esp_err_t err = nvs_get_str(kv_handle, key, value, &length);
+  if (length == 0) {
+    return;
+  }
+  size_t len = length;
+  esp_err_t err = nvs_get_str(kv_handle, key, value, &len);
+  if (err == ESP_OK) {
+    return;
+  }
+  value[0] = 0;
+  if (err == ESP_ERR_NVS_INVALID_LENGTH) {
+    // The stored string is longer than the caller's buffer (e.g. a 200-char
+    // OTA_SRV_IP read into a 20-byte buffer). Return a truncated copy instead
+    // of aborting into a reboot loop that only an NVS erase could break.
+    size_t needed = 0;
+    if (nvs_get_str(kv_handle, key, NULL, &needed) == ESP_OK && needed > 0) {
+      char *tmp = malloc(needed);
+      if (tmp != NULL) {
+        if (nvs_get_str(kv_handle, key, tmp, &needed) == ESP_OK) {
+          strncpy(value, tmp, length - 1);
+          value[length - 1] = 0;
+        }
+        free(tmp);
+      }
+    }
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV %s longer than %u bytes, truncated", key, (unsigned int)length);
+    return;
+  }
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    ESP_LOGW(SGO_LOG_NOSEND, "@KV %s not found, returning empty string", key);
+    return;
+  }
   ESP_ERROR_CHECK(err);
 }
 
