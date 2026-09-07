@@ -81,7 +81,7 @@ Measured limit (2026-09-07, config.json 6.3 KB gz): `app.html` at **12.6 KB gz f
 2. `upload_htmlapp.sh` checks the same budget **before deleting anything** on the controller — or the real free space when the firmware reports `fs_used`/`fs_total` in `/mqttdiag` — and, after uploading, reads both files back and compares them byte for byte
 3. firmware (`httpd_fs.c`, from commit after `3804e84`): the upload handler refuses a file that does not fit (`Not enough space on storage`, HTTP 500), writes unbuffered so a short `fwrite` is caught per chunk, and treats a failed `fclose` as a failed upload (file removed) instead of answering 200
 
-The current build is ~11.9 KB gz.
+The current build is ~11.9 KB gz. With the firmware from 2026-09-07 `/mqttdiag` reports the real figures: `fs_total` = 22 841 bytes usable, `fs_used` = 19 076 with the 11.9 KB + 6.3 KB payload (≈870 bytes of SPIFFS index overhead), i.e. ~3.7 KB free — hence the 19 000-byte budget.
 
 Earlier discovery: `style.custom.css` once contained a full second copy of `normalize.css` next to `normalize.min.css`; removing that duplication was required to make the compressed app fit.
 
