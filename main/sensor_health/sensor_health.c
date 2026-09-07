@@ -259,13 +259,6 @@ static bool update_box_health(int box, char *alert, size_t alert_len) {
 }
 
 static uint32_t get_sensor_health_period_ms() {
-  if (is_sensor_health_enabled_undefined()) {
-    set_sensor_health_enabled(1);
-  }
-  if (is_sensor_health_period_s_undefined()) {
-    set_sensor_health_period_s(60);
-  }
-
   uint16_t period_s = get_sensor_health_period_s();
   if (period_s == 0) {
     period_s = 60;
@@ -319,18 +312,10 @@ static void sensor_health_task(void *param) {
 void init_sensor_health() {
   ESP_LOGI(SGO_LOG_NOSEND, "@SENSOR_HEALTH Initializing sensor_health module");
 
-  if (is_sensor_health_enabled_undefined()) {
-    set_sensor_health_enabled(1);
-  }
-  if (is_sensor_health_period_s_undefined()) {
-    set_sensor_health_period_s(60);
-  }
-  if (is_sensor_health_warmup_samples_undefined()) {
-    set_sensor_health_warmup_samples(3);
-  }
-  if (is_sensor_health_stuck_samples_undefined()) {
-    set_sensor_health_stuck_samples(5);
-  }
+  // No defaults here: is_*_undefined() is a RAM flag that is true on every
+  // boot, so seeding through it overwrote the NVS-stored settings at each
+  // reboot (stuck_samples went 15 -> 5 after an OTA on 2026-09-07). kv.c
+  // already applies the CUE defaults when a key is missing from NVS.
   set_sensor_health_status(SENSOR_HEALTH_STATUS_UNKNOWN);
   set_sensor_health_last_alert("");
 
