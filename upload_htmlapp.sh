@@ -62,3 +62,16 @@ curl -sS -X DELETE "http://$NAME/fs/config.json" >/dev/null || true
 
 curl --fail -XPOST --upload-file "$TMP_DIR/app.html" -vvv "http://$NAME/fs/app.html"
 curl --fail -XPOST --upload-file "$TMP_DIR/config.json" -vvv "http://$NAME/fs/config.json"
+
+# SPIFFS reports 200 even when it ran out of space halfway through a file
+# (seen 2026-09-07 with a 13.5 KB app.html: config.json came back truncated).
+# Read both files back and make sure the gzip streams are complete.
+for f in app.html config.json; do
+  curl -sS --fail -o "$TMP_DIR/$f.check" "http://$NAME/fs/$f"
+  if ! cmp -s "$TMP_DIR/$f" "$TMP_DIR/$f.check"; then
+    echo "ERROR: $f read back from the controller differs from the upload (SPIFFS full?)" >&2
+    echo "       shrink app.html (see docs/ui-customization.md) and upload again" >&2
+    exit 1
+  fi
+done
+echo "Verified: app.html and config.json read back intact from $NAME"

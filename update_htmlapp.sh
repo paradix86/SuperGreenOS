@@ -48,8 +48,26 @@ if [ "${SGOS_HTML_MINIFY:-1}" != "0" ] && command -v terser >/dev/null 2>&1; the
   SRC_DIR="$(mktemp -d)"
   trap 'rm -rf "$SRC_DIR"' EXIT
   cp "$ROOT"/html_app/* "$SRC_DIR/"
-  for js in "$SRC_DIR"/*.js; do
-    terser "$js" --compress --mangle --output "$js.min" && mv -f "$js.min" "$js"
+  # The three scripts share one global scope in the page, so minify them as
+  # one bundle (top-level names mangled too): index.html keeps including
+  # utils.js / onload.js / dashboard.js, the last two are just empty here.
+  cat "$SRC_DIR/utils.js" "$SRC_DIR/onload.js" "$SRC_DIR/dashboard.js" > "$SRC_DIR/bundle.js"
+  terser "$SRC_DIR/bundle.js" --compress passes=2 --mangle --toplevel --output "$SRC_DIR/utils.js"
+  : > "$SRC_DIR/onload.js"
+  : > "$SRC_DIR/dashboard.js"
+  rm -f "$SRC_DIR/bundle.js"
+  # CSS: drop comments and collapse whitespace (no selector/value rewriting)
+  for css in "$SRC_DIR"/style.css "$SRC_DIR"/dashboard.css; do
+    python - "$css" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+s = re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+s = re.sub(r"\s+", " ", s)
+s = re.sub(r"\s*([{}:;,>])\s*", r"\1", s)
+s = s.replace(";}", "}")
+open(p, "w", encoding="utf-8").write(s.strip())
+PY
   done
 elif [ "${SGOS_HTML_MINIFY:-1}" != "0" ]; then
   echo "WARNING: terser not found, app.html will embed unminified JS (npm install -g terser)" >&2

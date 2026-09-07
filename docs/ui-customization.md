@@ -73,7 +73,9 @@ Recovered and preserved in the repo:
 
 The controller SPIFFS partition is only `32 KB` (about 24 KB usable once SPIFFS keeps its two spare blocks), shared by `app.html` and `config.json`, so UI size is part of the design. `update_htmlapp.sh` prints the gzip sizes; as of 2026-09-06 they are ~12.6 KB + ~6.3 KB.
 
-`update_htmlapp.sh` minifies the JS with `terser` (`npm install -g terser`) before rendering; without it the page still renders but gzips ~2.4 KB larger, which is most of the remaining margin. `SGOS_HTML_MINIFY=0` skips minification for debugging.
+`update_htmlapp.sh` minifies the JS with `terser` (`npm install -g terser`) as one bundle with top-level mangling, and strips CSS whitespace, before rendering; without terser the page still renders but gzips ~3 KB larger. `SGOS_HTML_MINIFY=0` skips minification for debugging.
+
+Measured limit (2026-09-07, config.json 6.3 KB gz): `app.html` at **12.6 KB gz fits, 13.5 KB does not** — the second upload still answers `200` but the file is silently truncated. `upload_htmlapp.sh` now reads both files back and compares them; if it fails, shrink `app.html` and upload again (the current build is ~11.9 KB gz).
 
 Earlier discovery: `style.custom.css` once contained a full second copy of `normalize.css` next to `normalize.min.css`; removing that duplication was required to make the compressed app fit.
 
