@@ -234,6 +234,42 @@
   box-sizing: border-box;
 }
 
+.dash_alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4pt;
+  margin-bottom: 8pt;
+}
+
+.dash_alerts > .chip {
+  white-space: normal;
+}
+
+.dash_ref {
+  margin: 0 0 4pt 0;
+  font-size: 0.85em;
+  color: #8a8a8a;
+}
+
+.dash_ref > i {
+  display: block;
+  position: relative;
+  height: 6px;
+  margin-top: 2pt;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #cfe8d4, #f2d9a6);
+}
+
+.dash_ref > i > b {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 12px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background-color: #454545;
+}
+
 .dash_note {
   margin: 4pt 0;
   padding: 4pt 6pt;

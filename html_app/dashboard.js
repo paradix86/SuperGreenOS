@@ -18,8 +18,9 @@ const DASH_RESET_LABELS = { 1: 'Power-on', 3: 'Software', 4: 'Panic', 5: 'Interr
 const DASH_OTA_LABELS = { 0: 'Idle', 1: 'In progress', 2: 'Disabled', 3: 'Failed' }
 const DASH_TIMER_LABELS = { 0: 'Manual', 1: 'On/Off', 2: 'Season' }
 
-const DASH_BOX_FAST = ['temp', 'humi', 'vpd', 'co2', 'weight', 'timer_output', 'led_dim', 'fan_duty', 'blower_duty', 'watering_power', 'watering_left', 'watering_last']
-const DASH_BOX_SLOW = ['timer_type', 'on_hour', 'on_min', 'off_hour', 'off_min', 'watering_period', 'watering_duration', 'started_at', 'duration_days', 'fan_ref_source', 'blower_ref_source']
+const DASH_BOX_FAST = ['temp', 'humi', 'vpd', 'co2', 'weight', 'timer_output', 'led_dim', 'fan_duty', 'fan_ref', 'blower_duty', 'blower_ref', 'watering_power', 'watering_left', 'watering_last']
+const DASH_BOX_SLOW = ['timer_type', 'on_hour', 'on_min', 'off_hour', 'off_min', 'watering_period', 'watering_duration', 'started_at', 'duration_days', 'fan_ref_source', 'fan_ref_min', 'fan_ref_max', 'blower_ref_source', 'blower_ref_min', 'blower_ref_max']
+const DASH_TIMER_ONOFF = 1
 const DASH_HEALTH_SETTINGS = ['sensor_health_enabled', 'sensor_health_period_s', 'sensor_health_warmup_samples', 'sensor_health_stuck_samples']
 
 const dashboard = {
@@ -136,6 +137,68 @@ function dashIndirLabel(name, value) {
   return index >= 0 ? key.indir.helpers[index] : null
 }
 
+// "fan follows: SHT21 humidity on port #1 · 60 (55..65)" plus a marker showing
+// where the reference sits inside its min..max band: this is what decides the
+// duty, so a wrong band is visible at a glance. VPD sources are kPa * 100.
+function dashRefBand(label, sourceLabel, ref, min, max) {
+  if (!sourceLabel) {
+    return ''
+  }
+  const isVpd = /vpd/i.test(sourceLabel)
+  const fmt = (v) => (v == null ? '-' : dashNum(isVpd ? v / 100 : v, isVpd ? 2 : 0))
+  let marker = ''
+  if (ref != null && min != null && max != null && Number(max) > Number(min)) {
+    const pct = Math.max(0, Math.min(100, ((Number(ref) - Number(min)) / (Number(max) - Number(min))) * 100))
+    marker = `<i><b style="left:${pct.toFixed(0)}%"></b></i>`
+  }
+  return `<div class="dash_ref"><span>${dashEsc(label)} follows: ${dashEsc(sourceLabel)} · ${fmt(ref)} (${fmt(min)}..${fmt(max)})</span>${marker}</div>`
+}
+
+// next on/off switch of an On/Off timer, from the phone clock
+function dashNextTimerEvent(day, slow) {
+  if (Number(slow.timer_type) != DASH_TIMER_ONOFF || slow.on_hour == null || slow.off_hour == null) {
+    return ''
+  }
+  const now = new Date()
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const target = day
+    ? Number(slow.off_hour) * 60 + Number(slow.off_min || 0)
+    : Number(slow.on_hour) * 60 + Number(slow.on_min || 0)
+  let wait = target - nowMin
+  if (wait <= 0) {
+    wait += 1440
+  }
+  return `${day ? 'lights off' : 'lights on'} at ${dashPad(Math.floor(target / 60))}:${dashPad(target % 60)} (in ${dashDuration(wait * 60)})`
+}
+
+function dashCollectAlerts(diag, health, boxes) {
+  const alerts = []
+  if (diag) {
+    if (diag.wifi_status != DASH_WIFI_CONNECTED) alerts.push(['bad', 'Wi-Fi not connected'])
+    if (diag.mqtt_connected != 1) alerts.push(['warn', 'MQTT broker not connected'])
+    if (!diag.time_valid) alerts.push(['warn', 'Clock not synced: timers may be off'])
+    if (diag.ota_status == 3) alerts.push(['warn', 'Last OTA failed'])
+    if (Number(diag.heap_free) < DASH_LOW_HEAP_BYTES) alerts.push(['bad', `Free heap is low right now (${dashNum(diag.heap_free / 1024, 1, ' KB')})`])
+    if ([4, 5, 6, 7, 9].indexOf(Number(diag.reset_reason)) >= 0) alerts.push(['bad', `Last reboot was a ${DASH_RESET_LABELS[diag.reset_reason].toLowerCase()}`])
+  } else {
+    alerts.push(['warn', '/mqttdiag not available: controller health unknown'])
+  }
+  if (Number(health.sensor_health_status) == 3) alerts.push(['warn', `Sensor health: ${health.sensor_health_last_alert || 'warning'}`])
+  Object.keys(boxes).forEach((i) => {
+    const b = boxes[i]
+    if (b.enabled == 1 && Number(b.watering_power) > 0 && Number(b.watering_left) == 0) alerts.push(['warn', `Box ${Number(i) + 1}: watering has no cycles left`])
+    if (b.enabled == 1 && b.temp == null && b.humi == null) alerts.push(['warn', `Box ${Number(i) + 1}: no sensor readings`])
+  })
+  return alerts
+}
+
+function dashRenderAlerts(alerts) {
+  if (alerts.length == 0) {
+    return `<div class="dash_alerts">${dashChip('All good', 'ok')}</div>`
+  }
+  return `<div class="dash_alerts">${alerts.map((a) => dashChip(a[1], a[0])).join('')}</div>`
+}
+
 // --- history / sparklines ---------------------------------------------------
 
 function dashLoadHistory() {
@@ -232,6 +295,8 @@ function dashRenderController(diag, health) {
     ${heapLow ? '<div class="dash_note warn">Heap dipped below 12 KB since boot: keep an eye on it.</div>' : ''}
     ${dashRow('Restarts', dashEsc(diag.n_restarts))}
     ${dashRow('Last reset', dashChip(resetLabel, resetBad ? 'bad' : 'ok'))}
+    ${diag.reset_history ? dashRow('Reset history', `<span class="dash_small">${dashEsc(`${diag.reset_history}`.split(',').map((r) => DASH_RESET_LABELS[r] || r).join(', '))}</span>`) : ''}
+    ${diag.nvs_used != null ? dashRow('NVS entries', `${dashEsc(diag.nvs_used)} used / ${dashEsc(diag.nvs_free)} free`) : ''}
     ${dashRow('Broker', `<span class="dash_small">${dashEsc(diag.broker_url)}</span>`)}
     ${dashRow('Sensor health', `${dashChip(healthLabel, healthStatus == 1 ? 'ok' : healthStatus == 3 ? 'warn' : '')} <span class="dash_small">${dashEsc(health.sensor_health_last_alert || 'no alert')}</span>`)}
   `
@@ -279,11 +344,12 @@ function dashRenderBox(i, fast, slow, history) {
         <div><span>RH 3h</span>${dashSparkline(series.humi)}</div>
         <div><span>VPD 3h</span>${dashSparkline(series.vpd, 0.01)}</div>
       </div>
+      ${enabled ? `<div class="dash_small dash_muted">${dashEsc(dashNextTimerEvent(day, slow))}</div>` : ''}
       ${dashBar('LED', fast.led_dim)}
       ${dashBar('Fan', fast.fan_duty)}
-      ${fanSource ? `<div class="dash_small dash_muted">fan follows: ${dashEsc(fanSource)}</div>` : ''}
+      ${dashRefBand('fan', fanSource, fast.fan_ref, slow.fan_ref_min, slow.fan_ref_max)}
       ${dashBar('Blower', fast.blower_duty)}
-      ${blowerSource ? `<div class="dash_small dash_muted">blower follows: ${dashEsc(blowerSource)}</div>` : ''}
+      ${dashRefBand('blower', blowerSource, fast.blower_ref, slow.blower_ref_min, slow.blower_ref_max)}
       ${dashRow('Watering', `<span class="dash_small">${dashEsc(watering)}</span>`)}
       ${Number(fast.watering_power) > 0 ? dashRow('Last watering', dashAgo(Number(fast.watering_last))) : ''}
       ${season}
@@ -418,6 +484,7 @@ async function dashRefresh() {
     })
     dashPushHistory(sampled)
 
+    root.querySelector('#dash_alerts').innerHTML = dashRenderAlerts(dashCollectAlerts(diag, health, boxes))
     root.querySelector('#dash_controller').innerHTML = dashRenderController(diag, health)
     root.querySelector('#dash_boxes').innerHTML = Object.keys(boxes)
       .filter((i) => boxes[i].enabled == 1 || dashboard.showDisabled)
@@ -450,6 +517,7 @@ function renderDashboard() {
       <button id="dash_refresh" type="button">Refresh now</button>
       <span id="dash_updated" class="dash_muted">Loading...</span>
     </div>
+    <div id="dash_alerts"></div>
     <div class="dash_grid">
       <div class="dash_card">
         <div class="dash_card_title"><h3>Controller</h3></div>
