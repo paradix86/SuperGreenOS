@@ -91,8 +91,18 @@ render() {
 render config.json "$OUT_DIR/config.json"
 render index.html "$OUT_DIR/app.html"
 
+total_gz=0
 for f in app.html config.json; do
   raw=$(wc -c < "$OUT_DIR/$f")
   gz=$(gzip -9 -n -c "$OUT_DIR/$f" | wc -c)
+  total_gz=$((total_gz + gz))
   printf "%-12s %7d bytes raw, %6d bytes gzip\n" "$f" "$raw" "$gz"
 done
+# same budget as upload_htmlapp.sh: fail here, at render time, rather than
+# on the controller (a 13.5 KB app.html silently truncated config.json)
+BUDGET="${SGOS_SPIFFS_BUDGET:-19000}"
+if [ "$total_gz" -gt "$BUDGET" ]; then
+  echo "ERROR: app.html + config.json = $total_gz bytes gzip exceed the SPIFFS budget of $BUDGET (see docs/ui-customization.md)" >&2
+  exit 1
+fi
+echo "Total $total_gz bytes gzip, budget $BUDGET"

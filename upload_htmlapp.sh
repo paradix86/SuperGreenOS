@@ -55,6 +55,38 @@ PY
 compress_file "$CONFIG_FILE" "$TMP_DIR/config.json"
 compress_file "$APP_FILE" "$TMP_DIR/app.html"
 
+# Size guard, before anything on the controller is touched. The 32 KB SPIFFS
+# partition holds about 24 KB of pages minus per-file index pages and the
+# blocks SPIFFS keeps for garbage collection; measured on 2026-09-07:
+# 12.6 KB + 6.3 KB fits, 13.5 KB + 6.3 KB does not (config.json came back
+# truncated with a 200). Newer firmwares report fs_used/fs_total in /mqttdiag,
+# in which case the real free space (after deleting the old files) is used.
+BUDGET="${SGOS_SPIFFS_BUDGET:-19000}"
+SLACK=2048
+app_gz=$(wc -c < "$TMP_DIR/app.html")
+cfg_gz=$(wc -c < "$TMP_DIR/config.json")
+need=$((app_gz + cfg_gz))
+diag="$(curl -sS --max-time 10 "http://$NAME/mqttdiag" 2>/dev/null || true)"
+fs_total="$(printf '%s' "$diag" | sed -n 's/.*"fs_total":\([0-9]*\).*/\1/p')"
+fs_used="$(printf '%s' "$diag" | sed -n 's/.*"fs_used":\([0-9]*\).*/\1/p')"
+old_app="$(curl -sS --max-time 10 -o /dev/null -w '%{size_download}' "http://$NAME/fs/app.html" 2>/dev/null || echo 0)"
+old_cfg="$(curl -sS --max-time 10 -o /dev/null -w '%{size_download}' "http://$NAME/fs/config.json" 2>/dev/null || echo 0)"
+if [ -n "$fs_total" ] && [ "$fs_total" -gt 0 ]; then
+  free_after=$((fs_total - fs_used + old_app + old_cfg))
+  echo "SPIFFS: total=$fs_total used=$fs_used, ~$free_after free after deleting the old files; need $need + $SLACK slack"
+  if [ $((need + SLACK)) -gt "$free_after" ]; then
+    echo "ERROR: app.html ($app_gz) + config.json ($cfg_gz) do not fit, nothing uploaded" >&2
+    exit 1
+  fi
+else
+  echo "Payload: app.html $app_gz + config.json $cfg_gz = $need bytes gz (budget $BUDGET)"
+  if [ "$need" -gt "$BUDGET" ]; then
+    echo "ERROR: payload exceeds the SPIFFS budget of $BUDGET bytes, nothing uploaded" >&2
+    echo "       shrink app.html (docs/ui-customization.md) or override SGOS_SPIFFS_BUDGET at your own risk" >&2
+    exit 1
+  fi
+fi
+
 # On the legacy controller SPIFFS, restore is most reliable if we clear the
 # old payload first and then upload app.html before config.json.
 curl -sS -X DELETE "http://$NAME/fs/app.html" >/dev/null || true

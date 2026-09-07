@@ -75,7 +75,13 @@ The controller SPIFFS partition is only `32 KB` (about 24 KB usable once SPIFFS 
 
 `update_htmlapp.sh` minifies the JS with `terser` (`npm install -g terser`) as one bundle with top-level mangling, and strips CSS whitespace, before rendering; without terser the page still renders but gzips ~3 KB larger. `SGOS_HTML_MINIFY=0` skips minification for debugging.
 
-Measured limit (2026-09-07, config.json 6.3 KB gz): `app.html` at **12.6 KB gz fits, 13.5 KB does not** — the second upload still answers `200` but the file is silently truncated. `upload_htmlapp.sh` now reads both files back and compares them; if it fails, shrink `app.html` and upload again (the current build is ~11.9 KB gz).
+Measured limit (2026-09-07, config.json 6.3 KB gz): `app.html` at **12.6 KB gz fits, 13.5 KB does not** — the second upload still answered `200` but the file was silently truncated. Three guards now exist:
+
+1. `update_htmlapp.sh` fails at render time when `app.html` + `config.json` exceed `SGOS_SPIFFS_BUDGET` (default 19000 bytes gzip)
+2. `upload_htmlapp.sh` checks the same budget **before deleting anything** on the controller — or the real free space when the firmware reports `fs_used`/`fs_total` in `/mqttdiag` — and, after uploading, reads both files back and compares them byte for byte
+3. firmware (`httpd_fs.c`, from commit after `3804e84`): the upload handler refuses a file that does not fit (`Not enough space on storage`, HTTP 500), writes unbuffered so a short `fwrite` is caught per chunk, and treats a failed `fclose` as a failed upload (file removed) instead of answering 200
+
+The current build is ~11.9 KB gz.
 
 Earlier discovery: `style.custom.css` once contained a full second copy of `normalize.css` next to `normalize.min.css`; removing that duplication was required to make the compressed app fit.
 
