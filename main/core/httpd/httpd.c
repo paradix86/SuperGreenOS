@@ -25,6 +25,7 @@
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <nvs.h>
+#include <esp_spiffs.h>
 #include <time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -322,6 +323,11 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   time_t now_s = 0;
   time(&now_s);
   int time_valid = now_s >= 1500000000 ? 1 : 0;  // clock past 2017 = NTP or NVS seed applied
+  size_t fs_total = 0, fs_used = 0;
+  if (esp_spiffs_info(NULL, &fs_total, &fs_used) != ESP_OK) {
+    fs_total = 0;
+    fs_used = 0;
+  }
   nvs_stats_t nvs_stats = {0};
   if (nvs_get_stats(NULL, &nvs_stats) != ESP_OK) {
     nvs_stats.used_entries = 0;
@@ -343,7 +349,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"reset_history\":\"%s\",\"heap_free\":%lu,"
       "\"heap_min_free\":%lu,\"heap_min_free_at\":%ld,\"heap_low_events\":%d,"
-      "\"uptime_s\":%ld,\"nvs_used\":%u,\"nvs_free\":%u,"
+      "\"uptime_s\":%ld,\"fs_used\":%u,\"fs_total\":%u,\"nvs_used\":%u,\"nvs_free\":%u,"
       "\"mqtt_stack_hwm\":%ld,\"time_valid\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
       (long)mqtt_stage,
@@ -360,6 +366,8 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       get_heap_min_free_at(),
       get_heap_low_events(),
       uptime_s,
+      (unsigned int)fs_used,
+      (unsigned int)fs_total,
       (unsigned int)nvs_stats.used_entries,
       (unsigned int)nvs_stats.free_entries,
       (long)mqtt_stack_hwm,

@@ -45,6 +45,10 @@ char file_buffer[FILE_BUFSIZE] = {0};
 #define MAX_FILE_SIZE (15*1024)
 #define MAX_FILE_SIZE_STR "15KB"
 
+/* SPIFFS needs spare pages for the object index and for garbage collection
+ * on top of the payload; below this slack a write "succeeds" and truncates. */
+#define SPIFFS_UPLOAD_SLACK (2*1024)
+
 /* Build FILE_BASE_PATH + uri_path into out. The URI can be up to
  * CONFIG_HTTPD_MAX_URI_LEN (512) bytes while the path buffer is FILE_PATH_MAX
  * (47) bytes, so an unbounded strcat smashed the stack; also refuse ".." so a
@@ -308,6 +312,18 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     return ESP_FAIL;
   }
 
+  /* Refuse up front what cannot fit: on 2026-09-07 a 13.5 KB app.html was
+   * accepted and the following config.json came back truncated with a 200. */
+  size_t fs_total = 0, fs_used = 0;
+  if (esp_spiffs_info(NULL, &fs_total, &fs_used) == ESP_OK) {
+    size_t fs_free = fs_total > fs_used ? fs_total - fs_used : 0;
+    if ((size_t)req->content_len + SPIFFS_UPLOAD_SLACK > fs_free) {
+      ESP_LOGE(SGO_LOG_NOSEND, "@FS Not enough space for %s: %d bytes requested, %u free", filename, req->content_len, (unsigned int)fs_free);
+      httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Not enough space on storage");
+      return ESP_FAIL;
+    }
+  }
+
   fd = fopen(filepath, "w");
   if (!fd) {
     ESP_LOGE(SGO_LOG_NOSEND, "@FS Failed to create file : %s", filepath);
@@ -315,6 +331,9 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
     return ESP_FAIL;
   }
+  /* stdio buffering hid ENOSPC from fwrite() and only surfaced it in fclose(),
+   * whose result was ignored: write straight through so every chunk reports */
+  setvbuf(fd, NULL, _IONBF, 0);
 
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   ESP_LOGI(SGO_LOG_NOSEND, "@FS Receiving file : %s...", filename);
@@ -366,8 +385,14 @@ esp_err_t upload_post_handler(httpd_req_t *req)
     remaining -= received;
   }
 
-  /* Close file upon upload completion */
-  fclose(fd);
+  /* Close file upon upload completion; a failed close means the tail of the
+   * file never reached flash */
+  if (fclose(fd) != 0) {
+    unlink(filepath);
+    ESP_LOGE(SGO_LOG_NOSEND, "@FS File close failed, upload discarded : %s", filename);
+    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to flush file to storage");
+    return ESP_FAIL;
+  }
   ESP_LOGI(SGO_LOG_NOSEND, "@FS File reception complete");
 
   httpd_resp_sendstr(req, "@FS File uploaded successfully");
