@@ -30,8 +30,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include <stdarg.h>
+#include <string.h>
+
 #include "../kv/kv.h"
 #include "../log/log.h"
+#include "../modules.h"
 #include "../mqtt/mqtt.h"
 #include "../reboot/reboot.h"
 
@@ -384,6 +388,130 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+/* /dash: everything the web dashboard shows, in one JSON document. The
+ * page used to issue ~40 GET /i requests per refresh; every open socket costs
+ * this chip 3-4 KB of heap, so one chunked response is much cheaper for it.
+ * Chunked because the httpd task stack is 6 KB: only one box is formatted at
+ * a time in a 768-byte buffer. */
+#define DASH_CHUNK_SIZE 768
+
+static void dash_append(char *buf, size_t size, size_t *len, const char *fmt, ...) {
+  if (*len + 1 >= size) {
+    return;
+  }
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(buf + *len, size - *len, fmt, ap);
+  va_end(ap);
+  if (n < 0) {
+    return;
+  }
+  *len += (size_t)n < size - *len ? (size_t)n : size - *len - 1;
+}
+
+static esp_err_t dash_send(httpd_req_t *req, const char *buf, size_t len) {
+  if (len + 1 >= DASH_CHUNK_SIZE) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@HTTPD /dash chunk truncated (%u bytes)", (unsigned int)len);
+  }
+  return httpd_resp_send_chunk(req, buf, len);
+}
+
+static esp_err_t dash_get_handler(httpd_req_t *req) {
+  if (auth_request(req) == false) {
+    return 0;
+  }
+  char buf[DASH_CHUNK_SIZE];
+  size_t len = 0;
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  len = 0;
+  dash_append(buf, sizeof(buf), &len, "{\"boxes\":[");
+#ifdef MODULE_BOX
+  for (int i = 0; i < N_BOX; ++i) {
+    if (dash_send(req, buf, len) != ESP_OK) {
+      return ESP_FAIL;
+    }
+    len = 0;
+    dash_append(buf, sizeof(buf), &len,
+        "%s{\"i\":%d,\"enabled\":%d,\"temp\":%d,\"humi\":%d,\"vpd\":%d,\"co2\":%ld,\"weight\":%ld,\"led_dim\":%ld,"
+        "\"started_at\":%lu,\"duration_days\":%u",
+        i ? "," : "", i, (int)get_box_enabled(i), (int)get_box_temp(i), (int)get_box_humi(i), (int)get_box_vpd(i),
+        (long)get_box_co2(i), (long)get_box_weight(i), (long)get_box_led_dim(i),
+        (unsigned long)get_box_started_at(i), (unsigned int)get_box_duration_days(i));
+#ifdef MODULE_TIMER
+    dash_append(buf, sizeof(buf), &len,
+        ",\"timer_type\":%d,\"timer_output\":%d,\"on_hour\":%d,\"on_min\":%d,\"off_hour\":%d,\"off_min\":%d",
+        (int)get_box_timer_type(i), (int)get_box_timer_output(i), (int)get_box_on_hour(i), (int)get_box_on_min(i),
+        (int)get_box_off_hour(i), (int)get_box_off_min(i));
+#endif
+#ifdef MODULE_FAN
+    dash_append(buf, sizeof(buf), &len,
+        ",\"fan_duty\":%d,\"fan_ref\":%d,\"fan_ref_min\":%d,\"fan_ref_max\":%d,\"fan_ref_source\":%d",
+        (int)get_box_fan_duty(i), (int)get_box_fan_ref(i), (int)get_box_fan_ref_min(i), (int)get_box_fan_ref_max(i),
+        (int)get_box_fan_ref_source(i));
+#endif
+#ifdef MODULE_BLOWER
+    dash_append(buf, sizeof(buf), &len,
+        ",\"blower_duty\":%d,\"blower_ref\":%d,\"blower_ref_min\":%d,\"blower_ref_max\":%d,\"blower_ref_source\":%d",
+        (int)get_box_blower_duty(i), (int)get_box_blower_ref(i), (int)get_box_blower_ref_min(i),
+        (int)get_box_blower_ref_max(i), (int)get_box_blower_ref_source(i));
+#endif
+#ifdef MODULE_WATERING
+    dash_append(buf, sizeof(buf), &len,
+        ",\"watering_power\":%d,\"watering_left\":%d,\"watering_last\":%ld,\"watering_period\":%u,\"watering_duration\":%u",
+        (int)get_box_watering_power(i), (int)get_box_watering_left(i), (long)get_box_watering_last(i),
+        (unsigned int)get_box_watering_period(i), (unsigned int)get_box_watering_duration(i));
+#endif
+    dash_append(buf, sizeof(buf), &len, "}");
+  }
+#endif
+  if (dash_send(req, buf, len) != ESP_OK) {
+    return ESP_FAIL;
+  }
+
+  len = 0;
+  dash_append(buf, sizeof(buf), &len, "],\"leds\":[");
+#ifdef MODULE_LED
+  for (int i = 0; i < N_LED; ++i) {
+    dash_append(buf, sizeof(buf), &len, "%s{\"box\":%d,\"duty\":%d,\"dim\":%d}",
+        i ? "," : "", (int)get_led_box(i), (int)get_led_duty(i), (int)get_led_dim(i));
+  }
+#endif
+  dash_append(buf, sizeof(buf), &len, "]");
+  if (dash_send(req, buf, len) != ESP_OK) {
+    return ESP_FAIL;
+  }
+
+  len = 0;
+#ifdef MODULE_SENSOR_HEALTH
+  char last_alert[64] = {0};
+  get_sensor_health_last_alert(last_alert, sizeof(last_alert) - 1);
+  dash_append(buf, sizeof(buf), &len,
+      ",\"sensor_health\":{\"status\":%d,\"last_alert\":\"%s\",\"enabled\":%d,\"period_s\":%u,"
+      "\"warmup_samples\":%u,\"stuck_samples\":%u}",
+      (int)get_sensor_health_status(), last_alert, (int)get_sensor_health_enabled(),
+      (unsigned int)get_sensor_health_period_s(), (unsigned int)get_sensor_health_warmup_samples(),
+      (unsigned int)get_sensor_health_stuck_samples());
+#endif
+  time_t now_s = 0;
+  time(&now_s);
+  dash_append(buf, sizeof(buf), &len, ",\"time\":%ld}", (long)now_s);
+  if (dash_send(req, buf, len) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+httpd_uri_t uri_get_dash = {
+  .uri      = "/dash",
+  .method   = HTTP_GET,
+  .handler  = dash_get_handler,
+  .user_ctx = NULL
+};
+
 httpd_uri_t uri_geti = {
   .uri      = "/i",
   .method   = HTTP_GET,
@@ -471,7 +599,7 @@ static void start_webserver_task(void *args) {
   config.stack_size = 6144;
   config.lru_purge_enable = true;
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 11;
+  config.max_uri_handlers = 12;
 
   if (httpd_start(&server, &config) == ESP_OK) {
     httpd_register_uri_handler(server, &uri_geti);
@@ -481,6 +609,7 @@ static void start_webserver_task(void *args) {
     httpd_register_uri_handler(server, &uri_setsigningkey);
     httpd_register_uri_handler(server, &uri_get_ip);
     httpd_register_uri_handler(server, &uri_get_mqttdiag);
+    httpd_register_uri_handler(server, &uri_get_dash);
     httpd_register_uri_handler(server, &file_download);
 		httpd_register_uri_handler(server, &file_upload);
 		httpd_register_uri_handler(server, &file_delete);

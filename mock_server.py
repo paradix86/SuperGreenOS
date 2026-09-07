@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
   parser.add_argument("--port", type=int, default=8080)
   parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path("spiffs_fs"))
+  parser.add_argument("--legacy-dash", action="store_true", help="answer 404 on /dash like firmwares before 2026-09-07")
   return parser.parse_args()
 
 
@@ -95,6 +96,44 @@ def build_mock_values(config: dict) -> tuple[dict[str, str], dict[str, str]]:
 
 START_TIME = int(time.time())
 
+DASH_BOX_FIELDS = (
+  "enabled", "temp", "humi", "vpd", "co2", "weight", "led_dim", "started_at", "duration_days",
+  "timer_type", "timer_output", "on_hour", "on_min", "off_hour", "off_min",
+  "fan_duty", "fan_ref", "fan_ref_min", "fan_ref_max", "fan_ref_source",
+  "blower_duty", "blower_ref", "blower_ref_min", "blower_ref_max", "blower_ref_source",
+  "watering_power", "watering_left", "watering_last", "watering_period", "watering_duration",
+)
+
+
+def build_mock_dash(int_values: dict[str, str], str_values: dict[str, str]) -> dict:
+  """Same shape as GET /dash on the 2026-09-07 firmware."""
+  def iv(key: str) -> int:
+    value = int_values.get(key, "0")
+    if key in ("BOX_0_TEMP", "BOX_0_HUMI", "BOX_0_VPD"):
+      return int(value) + random.choice((-1, 0, 0, 1))
+    return int(value)
+
+  boxes = []
+  for i in range(3):
+    box = {"i": i}
+    for field in DASH_BOX_FIELDS:
+      box[field] = iv(f"BOX_{i}_{field.upper()}")
+    boxes.append(box)
+  leds = [{"box": iv(f"LED_{i}_BOX"), "duty": iv(f"LED_{i}_DUTY"), "dim": iv(f"LED_{i}_DIM")} for i in range(6)]
+  return {
+    "boxes": boxes,
+    "leds": leds,
+    "sensor_health": {
+      "status": iv("SENSOR_HEALTH_STATUS"),
+      "last_alert": str_values.get("SENSOR_HEALTH_LAST_ALERT", ""),
+      "enabled": iv("SENSOR_HEALTH_ENABLED"),
+      "period_s": iv("SENSOR_HEALTH_PERIOD_S"),
+      "warmup_samples": iv("SENSOR_HEALTH_WARMUP_SAMPLES"),
+      "stuck_samples": iv("SENSOR_HEALTH_STUCK_SAMPLES"),
+    },
+    "time": int(time.time()),
+  }
+
 
 def build_mock_diag(int_values: dict[str, str]) -> dict:
   return {
@@ -112,6 +151,7 @@ class MockHandler(BaseHTTPRequestHandler):
   config_raw: bytes
   int_values: dict[str, str]
   str_values: dict[str, str]
+  legacy_dash: bool = False
 
   def _send(self, code: int, body: bytes, ctype: str = "text/plain") -> None:
     self.send_response(code)
@@ -145,6 +185,13 @@ class MockHandler(BaseHTTPRequestHandler):
 
     if path == "/mqttdiag":
       self._send_text(200, json.dumps(build_mock_diag(self.int_values)), "application/json")
+      return
+
+    if path == "/dash":
+      if MockHandler.legacy_dash:
+        self._send_text(404, "This URI does not exist")
+        return
+      self._send_text(200, json.dumps(build_mock_dash(self.int_values, self.str_values)), "application/json")
       return
 
     if path == "/i":
@@ -200,6 +247,7 @@ def main() -> None:
   MockHandler.config_raw = config_path.read_bytes()
   MockHandler.int_values = int_values
   MockHandler.str_values = str_values
+  MockHandler.legacy_dash = args.legacy_dash
 
   server = HTTPServer(("127.0.0.1", args.port), MockHandler)
   print(f"Mock server listening on http://127.0.0.1:{args.port} (root={root})")

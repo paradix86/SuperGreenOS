@@ -24,7 +24,7 @@ The default tab is a read-only overview built from one `GET /mqttdiag` plus the 
 - **LEDs** table: channel → box, duty, dim
 - 3-hour sparklines for temperature, RH and VPD, sampled every 30 s **while the page is open** and kept in this browser's `localStorage` (`supergreen.dashboard.v1`); the controller has no history storage
 
-Polling: one refresh every 30 s (~35 requests for one enabled box), slow-changing keys (schedule, watering config, ref sources, LED→box mapping) every 5 min.
+Polling: one refresh every 30 s = `GET /mqttdiag` + `GET /dash` on firmwares from 2026-09-07. On older firmwares `/dash` answers 404 and the page falls back to key-by-key reads (~40 requests per refresh, slow-changing keys every 5 min). `python mock_server.py --legacy-dash` exercises that fallback.
 
 ## Removed: browser-side "Automation & Insights"
 

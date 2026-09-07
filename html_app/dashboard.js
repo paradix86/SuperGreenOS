@@ -31,6 +31,7 @@ const dashboard = {
   slow: { boxes: {}, leds: null },
   history: null,
   showDisabled: false,
+  legacy: null, // null = not probed yet, false = /dash works, true = key-by-key fallback
 }
 
 function dashKey(name) {
@@ -427,6 +428,73 @@ async function dashSaveHealthSettings(form) {
 
 // --- refresh loop ----------------------------------------------------------
 
+// Firmwares from 2026-09-07 serve everything in one GET /dash; older ones
+// are read key by key (~40 requests). A 404 on /dash switches to the fallback
+// for the rest of the session.
+async function dashReadAll(slowDue) {
+  if (dashboard.legacy !== true) {
+    try {
+      const all = await fetchJson('/dash', { silent: true, allowGlobalRetry: false })
+      const boxes = {}
+      ;(all.boxes || []).forEach((b) => {
+        boxes[b.i] = b
+        dashboard.slow.boxes[b.i] = b
+      })
+      const leds = all.leds || []
+      const health = {
+        sensor_health_status: all.sensor_health ? all.sensor_health.status : null,
+        sensor_health_last_alert: all.sensor_health ? all.sensor_health.last_alert : null,
+      }
+      if (slowDue && all.sensor_health) {
+        dashFillHealthSettings({
+          sensor_health_enabled: all.sensor_health.enabled,
+          sensor_health_period_s: all.sensor_health.period_s,
+          sensor_health_warmup_samples: all.sensor_health.warmup_samples,
+          sensor_health_stuck_samples: all.sensor_health.stuck_samples,
+        })
+      }
+      dashboard.legacy = false
+      return { boxes: boxes, leds: leds, health: health }
+    } catch (e) {
+      if (e && e.status == 404) {
+        dashboard.legacy = true
+      } else if (dashboard.legacy === false) {
+        throw e // /dash exists but failed this time: keep the previous picture
+      }
+    }
+  }
+  const health = await dashReadMany(['sensor_health_status', 'sensor_health_last_alert'])
+  if (slowDue) {
+    dashFillHealthSettings(await dashReadMany(DASH_HEALTH_SETTINGS))
+  }
+  const nBoxes = dashArrayLen('box')
+  const boxes = {}
+  for (let i = 0; i < nBoxes; ++i) {
+    const enabled = await dashRead(`box_${i}_enabled`)
+    if (enabled != 1 && !dashboard.showDisabled) {
+      boxes[i] = { enabled: enabled }
+      continue
+    }
+    boxes[i] = Object.assign({ enabled: enabled }, await dashReadBox(i, DASH_BOX_FAST))
+    if (slowDue || !dashboard.slow.boxes[i]) {
+      dashboard.slow.boxes[i] = await dashReadBox(i, DASH_BOX_SLOW)
+    }
+  }
+  if (slowDue || !dashboard.slow.leds) {
+    const ledBoxes = []
+    for (let i = 0; i < dashArrayLen('led'); ++i) {
+      ledBoxes.push(await dashRead(`led_${i}_box`))
+    }
+    dashboard.slow.leds = ledBoxes
+  }
+  const leds = []
+  for (let i = 0; i < dashboard.slow.leds.length; ++i) {
+    const values = await dashReadMany([`led_${i}_duty`, `led_${i}_dim`])
+    leds.push({ box: dashboard.slow.leds[i], duty: values[`led_${i}_duty`], dim: values[`led_${i}_dim`] })
+  }
+  return { boxes: boxes, leds: leds, health: health }
+}
+
 async function dashRefresh() {
   if (dashboard.busy || !dashboard.root) {
     return
@@ -437,37 +505,10 @@ async function dashRefresh() {
     const now = Date.now()
     const slowDue = now - dashboard.slowAt >= DASH_SLOW_REFRESH_MS
     const diag = await fetchJson('/mqttdiag', { silent: true, allowGlobalRetry: false }).catch(() => null)
-    const health = await dashReadMany(['sensor_health_status', 'sensor_health_last_alert'])
-    if (slowDue) {
-      dashFillHealthSettings(await dashReadMany(DASH_HEALTH_SETTINGS))
-    }
-
-    const nBoxes = dashArrayLen('box')
-    const boxes = {}
-    for (let i = 0; i < nBoxes; ++i) {
-      const enabled = await dashRead(`box_${i}_enabled`)
-      if (enabled != 1 && !dashboard.showDisabled) {
-        boxes[i] = { enabled: enabled }
-        continue
-      }
-      boxes[i] = Object.assign({ enabled: enabled }, await dashReadBox(i, DASH_BOX_FAST))
-      if (slowDue || !dashboard.slow.boxes[i]) {
-        dashboard.slow.boxes[i] = await dashReadBox(i, DASH_BOX_SLOW)
-      }
-    }
-
-    if (slowDue || !dashboard.slow.leds) {
-      const ledBoxes = []
-      for (let i = 0; i < dashArrayLen('led'); ++i) {
-        ledBoxes.push(await dashRead(`led_${i}_box`))
-      }
-      dashboard.slow.leds = ledBoxes
-    }
-    const leds = []
-    for (let i = 0; i < dashboard.slow.leds.length; ++i) {
-      const values = await dashReadMany([`led_${i}_duty`, `led_${i}_dim`])
-      leds.push({ box: dashboard.slow.leds[i], duty: values[`led_${i}_duty`], dim: values[`led_${i}_dim`] })
-    }
+    const all = await dashReadAll(slowDue)
+    const boxes = all.boxes
+    const leds = all.leds
+    const health = all.health
     if (slowDue) {
       dashboard.slowAt = now
     }
