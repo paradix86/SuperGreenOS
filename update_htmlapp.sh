@@ -44,7 +44,9 @@ mkdir -p "$OUT_DIR"
 # gzip size decides whether app.html still fits next to config.json on the
 # 32 KB SPIFFS partition. SGOS_HTML_MINIFY=0 renders the sources verbatim.
 SRC_DIR="$ROOT/html_app"
-if [ "${SGOS_HTML_MINIFY:-1}" != "0" ] && command -v terser >/dev/null 2>&1; then
+# `terser --version` rather than `command -v`: under WSL the PATH also carries
+# Windows shims (Volta/npm) that resolve but cannot run.
+if [ "${SGOS_HTML_MINIFY:-1}" != "0" ] && terser --version >/dev/null 2>&1; then
   SRC_DIR="$(mktemp -d)"
   trap 'rm -rf "$SRC_DIR"' EXIT
   cp "$ROOT"/html_app/* "$SRC_DIR/"
