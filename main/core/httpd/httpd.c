@@ -505,6 +505,122 @@ static esp_err_t dash_get_handler(httpd_req_t *req) {
   return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+/* /kv: every readable key in one JSON document,
+ * {"i":{"NAME":int,...},"s":{"NAME":"str",...}}. The app used to load the
+ * ~290 parameters one GET /i or /s at a time (about 40 s over Wi-Fi); one
+ * chunked answer costs the chip a single socket. Streamed byte by byte into
+ * the same 768-byte buffer as /dash, so the httpd stack stays small. */
+typedef struct {
+  httpd_req_t *req;
+  char buf[DASH_CHUNK_SIZE];
+  size_t len;
+  bool failed;
+} kv_out_t;
+
+static void kv_putc(kv_out_t *o, char c) {
+  if (o->failed) {
+    return;
+  }
+  if (o->len + 1 >= sizeof(o->buf)) {
+    if (httpd_resp_send_chunk(o->req, o->buf, o->len) != ESP_OK) {
+      o->failed = true;
+      return;
+    }
+    o->len = 0;
+  }
+  o->buf[o->len++] = c;
+}
+
+static void kv_puts(kv_out_t *o, const char *s) {
+  while (*s) {
+    kv_putc(o, *s++);
+  }
+}
+
+static void kv_put_json_string(kv_out_t *o, const char *s) {
+  kv_putc(o, '"');
+  for (; *s; ++s) {
+    unsigned char c = (unsigned char)*s;
+    if (c == '"' || c == '\\') {
+      kv_putc(o, '\\');
+      kv_putc(o, (char)c);
+    } else if (c < 0x20) {
+      char esc[8];
+      snprintf(esc, sizeof(esc), "\\u%04x", c);
+      kv_puts(o, esc);
+    } else {
+      kv_putc(o, (char)c);
+    }
+  }
+  kv_putc(o, '"');
+}
+
+static void kv_put_int(kv_out_t *o, const char *name, long value, bool *first) {
+  char item[80];
+  snprintf(item, sizeof(item), "%s\"%s\":%ld", *first ? "" : ",", name, value);
+  *first = false;
+  kv_puts(o, item);
+}
+
+#define KV_PUT_ALL(mappings) \
+  for (int i = 0; mappings[i].name != NULL; ++i) { \
+    if (mappings[i].getter) { \
+      kv_put_int(&o, mappings[i].name, (long)mappings[i].getter(), &first); \
+    } \
+  }
+
+static esp_err_t kv_get_handler(httpd_req_t *req) {
+  if (auth_request(req) == false) {
+    return 0;
+  }
+  kv_out_t o = { .req = req, .len = 0, .failed = false };
+  bool first = true;
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  kv_puts(&o, "{\"i\":{");
+  KV_PUT_ALL(kvi8_mappings)
+  KV_PUT_ALL(kvui8_mappings)
+  KV_PUT_ALL(kvi16_mappings)
+  KV_PUT_ALL(kvui16_mappings)
+  KV_PUT_ALL(kvi32_mappings)
+  KV_PUT_ALL(kvui32_mappings)
+  kv_puts(&o, "},\"s\":{");
+
+  first = true;
+  char value[MAX_KVALUE_SIZE];
+  for (int i = 0; kvs_mappings[i].name != NULL; ++i) {
+    if (!kvs_mappings[i].getter) {
+      continue;
+    }
+    memset(value, 0, sizeof(value));
+    kvs_mappings[i].getter(value, MAX_KVALUE_SIZE - 1);
+    kv_puts(&o, first ? "\"" : ",\"");
+    kv_puts(&o, kvs_mappings[i].name);
+    kv_puts(&o, "\":");
+    kv_put_json_string(&o, value);
+    first = false;
+  }
+  kv_puts(&o, "}}");
+
+  if (o.failed) {
+    return ESP_FAIL;
+  }
+  if (o.len > 0 && httpd_resp_send_chunk(req, o.buf, o.len) != ESP_OK) {
+    return ESP_FAIL;
+  }
+  return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+httpd_uri_t uri_get_kv = {
+  .uri      = "/kv",
+  .method   = HTTP_GET,
+  .handler  = kv_get_handler,
+  .user_ctx = NULL
+};
+
 httpd_uri_t uri_get_dash = {
   .uri      = "/dash",
   .method   = HTTP_GET,
@@ -599,7 +715,7 @@ static void start_webserver_task(void *args) {
   config.stack_size = 6144;
   config.lru_purge_enable = true;
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 12;
+  config.max_uri_handlers = 13;
 
   if (httpd_start(&server, &config) == ESP_OK) {
     httpd_register_uri_handler(server, &uri_geti);
@@ -610,6 +726,7 @@ static void start_webserver_task(void *args) {
     httpd_register_uri_handler(server, &uri_get_ip);
     httpd_register_uri_handler(server, &uri_get_mqttdiag);
     httpd_register_uri_handler(server, &uri_get_dash);
+    httpd_register_uri_handler(server, &uri_get_kv);
     httpd_register_uri_handler(server, &file_download);
 		httpd_register_uri_handler(server, &file_upload);
 		httpd_register_uri_handler(server, &file_delete);

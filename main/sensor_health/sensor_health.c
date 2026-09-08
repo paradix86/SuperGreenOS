@@ -238,20 +238,32 @@ static bool update_box_health(int box, char *alert, size_t alert_len) {
     return false;
   }
 
-  if (temp_source > 0 && state->temp_same_count >= stuck_samples) {
-    snprintf(alert, alert_len, "box_%d_temp_stuck", box);
-    return true;
+  // A sensor is "stuck" only when every metric it feeds has not moved for
+  // stuck_samples. Temperature and humidity are whole degrees / percents and
+  // sit on the same integer for an hour in a still room (box_0_temp_stuck
+  // fired on 2026-09-08 with the SHT21 perfectly alive), while VPD is derived
+  // from the float readings at 0.01 kPa and keeps twitching. Only a frozen
+  // sensor holds all of them at once.
+  bool any_metric = false;
+  bool all_stuck = true;
+  if (temp_source > 0) {
+    any_metric = true;
+    all_stuck = all_stuck && state->temp_same_count >= stuck_samples;
   }
-  if (humi_source > 0 && state->humi_same_count >= stuck_samples) {
-    snprintf(alert, alert_len, "box_%d_humi_stuck", box);
-    return true;
+  if (humi_source > 0) {
+    any_metric = true;
+    all_stuck = all_stuck && state->humi_same_count >= stuck_samples;
   }
-  if (vpd_source > 0 && state->vpd_same_count >= stuck_samples) {
-    snprintf(alert, alert_len, "box_%d_vpd_stuck", box);
-    return true;
+  if (vpd_source > 0) {
+    any_metric = true;
+    all_stuck = all_stuck && state->vpd_same_count >= stuck_samples;
   }
-  if (co2_source > 0 && state->co2_same_count >= stuck_samples) {
-    snprintf(alert, alert_len, "box_%d_co2_stuck", box);
+  if (co2_source > 0) {
+    any_metric = true;
+    all_stuck = all_stuck && state->co2_same_count >= stuck_samples;
+  }
+  if (any_metric && all_stuck) {
+    snprintf(alert, alert_len, "box_%d_sensor_stuck", box);
     return true;
   }
 
