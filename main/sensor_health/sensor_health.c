@@ -25,6 +25,10 @@
 #include "sensor_health.h"
 #include "../core/log/log.h"
 #include "../core/kv/kv.h"
+#include "../core/modules.h"
+#ifdef MODULE_SHT21
+#include "../sht21/sht21.h"
+#endif
 
 #define SENSOR_HEALTH_STATUS_UNKNOWN 0
 #define SENSOR_HEALTH_STATUS_OK 1
@@ -46,8 +50,19 @@ typedef struct {
   uint8_t vpd_same_count;
   uint8_t co2_same_count;
   uint8_t warmup_remaining;
+  uint32_t raw_changes;
+  uint8_t raw_same_count;
   bool initialized;
 } sensor_health_box_state_t;
+
+// *_SOURCE values 1-3, 15-17 and 23-25 are the SHT21 on i2c port 0-2 (see
+// core/ref_source.h); anything else is not an SHT21.
+static int sht21_port_of_source(int source) {
+  if (source >= 1 && source <= 3) return source - 1;
+  if (source >= 15 && source <= 17) return source - 15;
+  if (source >= 23 && source <= 25) return source - 23;
+  return -1;
+}
 
 static sensor_health_box_state_t g_box_state[SENSOR_HEALTH_BOX_COUNT];
 static int8_t g_last_status = SENSOR_HEALTH_STATUS_UNKNOWN;
@@ -230,6 +245,28 @@ static bool update_box_health(int box, char *alert, size_t alert_len) {
   if (co2_source > 0) {
     update_same_count(get_box_co2_by_index(box), &state->co2, &state->co2_same_count, state->initialized);
   }
+#ifdef MODULE_SHT21
+  // The box values are whole degrees / percents (and VPD is derived from
+  // them), so they legitimately sit still for an hour in a quiet room. For an
+  // SHT21 the raw 16-bit words are the real liveness signal.
+  int port = sht21_port_of_source(temp_source);
+  if (port < 0) {
+    port = sht21_port_of_source(humi_source);
+  }
+  if (port >= 0) {
+    uint32_t changes = get_sht21_raw_changes(port);
+    if (state->initialized && changes == state->raw_changes) {
+      if (state->raw_same_count < 255) {
+        state->raw_same_count++;
+      }
+    } else {
+      state->raw_changes = changes;
+      state->raw_same_count = 0;
+    }
+  }
+#else
+  int port = -1;
+#endif
   state->initialized = true;
 
   if (state->warmup_remaining > 0) {
@@ -244,6 +281,14 @@ static bool update_box_health(int box, char *alert, size_t alert_len) {
   // fired on 2026-09-08 with the SHT21 perfectly alive), while VPD is derived
   // from the float readings at 0.01 kPa and keeps twitching. Only a frozen
   // sensor holds all of them at once.
+  if (port >= 0) {
+    if (state->raw_same_count >= stuck_samples) {
+      snprintf(alert, alert_len, "box_%d_sensor_stuck", box);
+      return true;
+    }
+    return false;
+  }
+
   bool any_metric = false;
   bool all_stuck = true;
   if (temp_source > 0) {

@@ -16,7 +16,15 @@
 #ifndef SHT21_H_
 #define SHT21_H_
 
+#include <stdint.h>
+
 void init_sht21(int i2cId);
 void loop_sht21(int i2cId);
+
+// Number of times the raw 16-bit temperature or humidity reading of the
+// sensor on i2c port [i2cId] differed from the previous one. A live SHT21
+// never returns the same raw words for long (14-bit resolution, thermal
+// noise); a frozen or unplugged one does. Used by sensor_health.
+uint32_t get_sht21_raw_changes(int i2cId);
 
 #endif

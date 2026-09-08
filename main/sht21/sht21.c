@@ -91,6 +91,28 @@ static uint16_t read_sht21(int i2cId) {
   return (v[0] << 8) | v[1];
 }
 
+#define SHT21_PORTS 3
+static uint16_t g_last_raw_temp[SHT21_PORTS];
+static uint16_t g_last_raw_humi[SHT21_PORTS];
+static uint32_t g_raw_changes[SHT21_PORTS];
+
+uint32_t get_sht21_raw_changes(int i2cId) {
+  if (i2cId < 0 || i2cId >= SHT21_PORTS) {
+    return 0;
+  }
+  return g_raw_changes[i2cId];
+}
+
+static void note_raw(int i2cId, uint16_t *last, uint16_t raw) {
+  if (i2cId < 0 || i2cId >= SHT21_PORTS) {
+    return;
+  }
+  if (*last != raw) {
+    *last = raw;
+    g_raw_changes[i2cId]++;
+  }
+}
+
 void loop_sht21(int i2cId) {
   int temp = 0;
   int humi = 0;
@@ -106,6 +128,7 @@ void loop_sht21(int i2cId) {
     int16_t v = read_sht21(i2cId);
     if (v != 255) {
       v &= ~0x0003;
+      note_raw(i2cId, &g_last_raw_temp[i2cId], (uint16_t)v);
       float vd = -46.85 + 175.72 * (float)(v) / 65536.0;
       set_sht21_temp(i2cId, vd);
       set_sht21_present(i2cId, 1);
@@ -123,6 +146,7 @@ void loop_sht21(int i2cId) {
     uint16_t v = read_sht21(i2cId);
     if (v != 255) {
       v &= ~0x0003;
+      note_raw(i2cId, &g_last_raw_humi[i2cId], v);
       float vd = -6.0 + 125.0 * (float)(v) / 65536.0;
       set_sht21_humi(i2cId, vd);
       set_sht21_present(i2cId, 1);
