@@ -72,9 +72,16 @@ async function exportCurrentConfig() {
   try {
     const values = {}
     const failed = []
+    const kv = await fetchKv(true)
     for (const key of config.keys) {
+      const t = key.type.charAt(0)
+      const table = kv ? (t == 'i' ? kv.i : kv.s) : null
+      if (table && Object.prototype.hasOwnProperty.call(table, key.caps_name)) {
+        values[key.caps_name] = table[key.caps_name]
+        continue
+      }
       try {
-        values[key.caps_name] = await fetchParam(key.type.charAt(0), key.caps_name, { silent: true })
+        values[key.caps_name] = await fetchParam(t, key.caps_name, { silent: true })
       } catch (e) {
         failed.push(key.caps_name)
       }
@@ -356,10 +363,12 @@ function renderField(title, field) {
       refreshBtn.disabled = disabled
     }
   }
-  const fetchField = () => {
+  // force (the Refresh button, a fresh read after Save): skip the /kv cache.
+  const fetchField = (force) => {
     setStatus('loading')
     setButtonsDisabled(true)
-    fetchParam(field.type.charAt(0), field.caps_name, { retryAction: fetchField })
+    const read = force ? fetchParam : fetchParamCached
+    read(field.type.charAt(0), field.caps_name, { retryAction: fetchField })
     .then(v => {
       currentValue = v
       setValue(v)
@@ -411,7 +420,7 @@ function renderField(title, field) {
     updateParam(field.type.charAt(0), field.caps_name, normalized.value)
       .then(() => {
         error.innerText = ''
-        fetchField()
+        fetchField(true)
       })
       .catch(() => {
         setStatus('modified')
@@ -590,6 +599,7 @@ function renderArray(title, array) {
 function renderParams(data) {
   const body = document.createElement('div')
   body.setAttribute('class', 'params')
+  fetchKv(false).catch(() => {}) // one request for every field below
 
   Object.keys(data).sort((d1, d2) => {
     if (data[d1].array) {

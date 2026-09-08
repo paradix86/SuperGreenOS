@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser()
   parser.add_argument("--port", type=int, default=8080)
   parser.add_argument("--root", type=pathlib.Path, default=pathlib.Path("spiffs_fs"))
-  parser.add_argument("--legacy-dash", action="store_true", help="answer 404 on /dash like firmwares before 2026-09-07")
+  parser.add_argument("--legacy-dash", action="store_true", help="answer 404 on /dash and /kv like firmwares before 2026-09-07/08")
   return parser.parse_args()
 
 
@@ -192,6 +192,15 @@ class MockHandler(BaseHTTPRequestHandler):
         self._send_text(404, "This URI does not exist")
         return
       self._send_text(200, json.dumps(build_mock_dash(self.int_values, self.str_values)), "application/json")
+      return
+
+    if path == "/kv":
+      if MockHandler.legacy_dash:
+        self._send_text(404, "This URI does not exist")
+        return
+      ints = {k: int(v) for k, v in self.int_values.items()}
+      strs = {k: v for k, v in self.str_values.items() if "PASSWORD" not in k}
+      self._send_text(200, json.dumps({"i": ints, "s": strs}), "application/json")
       return
 
     if path == "/i":

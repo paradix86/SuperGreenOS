@@ -26,6 +26,8 @@ The default tab is a read-only overview built from one `GET /mqttdiag` plus the 
 
 Polling: one refresh every 30 s = `GET /mqttdiag` + `GET /dash` on firmwares from 2026-09-07. On older firmwares `/dash` answers 404 and the page falls back to key-by-key reads (~40 requests per refresh, slow-changing keys every 5 min). `python mock_server.py --legacy-dash` exercises that fallback.
 
+The module tabs (System, Modules) fill their fields from one `GET /kv` (firmwares from 2026-09-08, cached 60 s in `utils.js`) instead of one `GET /i`/`/s` per field; a field's **Refresh** button and the read after **Save** always go to the controller. Export config uses the same call. On older firmwares `/kv` answers 404/405 and every field is read on its own, as before.
+
 ## Removed: browser-side "Automation & Insights"
 
 The recovered UI carried an `Automation & Insights` panel (Sensor Health, Energy Optimization, Dynamic Climate Setpoint, History & KPI) implemented in the minified `onload.custom.js`. It was removed on 2026-09-06 because it was unreliable and, in two cases, harmful:

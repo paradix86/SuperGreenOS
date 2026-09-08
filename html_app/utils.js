@@ -221,6 +221,42 @@ const fetchParam = async function(type, paramName, options) {
   }), options)
 }
 
+// GET /kv (firmwares from 2026-09-08): every readable key in one answer.
+// Cached for KV_CACHE_MS so opening a tab fills its fields from one request
+// instead of one GET per field. Resolves null on older firmwares (404, or
+// 405 from the OPTIONS wildcard): callers then read key by key.
+const KV_CACHE_MS = 60000
+const kvCache = { at: 0, i: null, s: null, unavailable: false, pending: null }
+
+function fetchKv(force) {
+  if (kvCache.unavailable) return Promise.resolve(null)
+  if (!force && kvCache.i && Date.now() - kvCache.at < KV_CACHE_MS) return Promise.resolve(kvCache)
+  if (kvCache.pending) return kvCache.pending
+  kvCache.pending = fetchJson('/kv', { silent: true, allowGlobalRetry: false })
+    .then((all) => {
+      kvCache.at = Date.now()
+      kvCache.i = (all && all.i) || {}
+      kvCache.s = (all && all.s) || {}
+      return kvCache
+    })
+    .catch((e) => {
+      if (e && (e.status == 404 || e.status == 405)) kvCache.unavailable = true
+      return null
+    })
+    .finally(() => { kvCache.pending = null })
+  return kvCache.pending
+}
+
+// One key: from the /kv cache when fresh, else one GET /i or /s.
+const fetchParamCached = async function(type, paramName, options) {
+  const kv = await fetchKv(false)
+  if (kv) {
+    const table = type == 'i' ? kv.i : kv.s
+    if (table && Object.prototype.hasOwnProperty.call(table, paramName)) return table[paramName]
+  }
+  return fetchParam(type, paramName, options)
+}
+
 const updateParam = async function(type, paramName, value, options) {
   const opts = Object.assign({ allowGlobalRetry: false }, options || {})
   return queueRequest(`Updating ${paramName}`, () => new Promise(function(resolve, reject) {
