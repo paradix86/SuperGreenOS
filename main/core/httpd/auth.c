@@ -16,7 +16,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <string.h>
 #include <esp_http_server.h>
+#include <esp_timer.h>
 
 #include "../kv/kv.h"
 #include "../log/log.h"
@@ -28,7 +30,28 @@ static bool auth_failed(httpd_req_t *req) {
   return false;
 }
 
+static char g_last_uri[64] = {0};
+static volatile long g_last_uri_at_s = 0;
+
+void httpd_last_request(char *uri, size_t size, long *at_s) {
+  strncpy(uri, g_last_uri, size - 1);
+  uri[size - 1] = 0;
+  *at_s = g_last_uri_at_s;
+}
+
+static void note_request(httpd_req_t *req) {
+  const char *q = strchr(req->uri, '?');
+  size_t n = q ? (size_t)(q - req->uri) : strlen(req->uri);
+  if (n >= sizeof(g_last_uri)) {
+    n = sizeof(g_last_uri) - 1;
+  }
+  memcpy(g_last_uri, req->uri, n);
+  g_last_uri[n] = 0;
+  g_last_uri_at_s = (long)(esp_timer_get_time() / 1000000LL);
+}
+
 bool auth_request(httpd_req_t *req) {
+  note_request(req);
   if (!hasstr(HTTPD_AUTH)) {
     return true;
   }

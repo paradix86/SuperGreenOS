@@ -17,6 +17,9 @@
  */
 
 #include "reboot.h"
+#include <esp_heap_caps.h>
+#include "../mqtt/mqtt.h"
+#include "../httpd/httpd.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +45,7 @@
 
 static volatile long heap_min_free_at_s = 0;
 static volatile int heap_low_events = 0;
+static char heap_min_ctx[96] = "none";
 
 static void heap_watch_task(void *args) {
   unsigned int last_min = esp_get_minimum_free_heap_size();
@@ -51,11 +55,23 @@ static void heap_watch_task(void *args) {
     unsigned int free_now = esp_get_free_heap_size();
     long uptime_s = (long)(esp_timer_get_time() / 1000000LL);
     if (min_free < last_min) {
+      // A dip shorter than one period is invisible to the sampled floor test
+      // below (2026-09-08: minimum 2320 B with 0 low events), so count it
+      // here as well, once per crossing of the floor.
+      if (min_free < HEAP_LOW_FLOOR_BYTES && last_min >= HEAP_LOW_FLOOR_BYTES) {
+        ++heap_low_events;
+      }
       last_min = min_free;
       heap_min_free_at_s = uptime_s;
+      char uri[64] = {0};
+      long uri_at_s = 0;
+      httpd_last_request(uri, sizeof(uri), &uri_at_s);
+      snprintf(heap_min_ctx, sizeof(heap_min_ctx), "uri=%s age=%lds mqtt=%d free=%u largest=%u",
+          uri[0] ? uri : "-", uptime_s - uri_at_s, get_mqtt_connected() ? 1 : 0, free_now,
+          (unsigned int)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
       // NOSEND on purpose: publishing over MQTT allocates, and we are here
       // precisely because memory is scarce.
-      ESP_LOGW(SGO_LOG_NOSEND, "@HEAP new minimum %u bytes at uptime %lds (free now %u)", min_free, uptime_s, free_now);
+      ESP_LOGW(SGO_LOG_NOSEND, "@HEAP new minimum %u bytes at uptime %lds (%s)", min_free, uptime_s, heap_min_ctx);
     }
     bool is_low = free_now < HEAP_LOW_FLOOR_BYTES;
     if (is_low && !was_low) {
@@ -64,6 +80,10 @@ static void heap_watch_task(void *args) {
     was_low = is_low;
     vTaskDelay(HEAP_WATCH_PERIOD_MS / portTICK_PERIOD_MS);
   }
+}
+
+const char *get_heap_min_ctx() {
+  return heap_min_ctx;
 }
 
 long get_heap_min_free_at() {

@@ -25,4 +25,8 @@ void init_httpd();
 void init_spiffs(void);
 bool auth_request(httpd_req_t *req);
 
+// Last URI any handler served and the uptime (s) it was received at; for
+// the heap watch context in /mqttdiag. `uri` must hold 64 bytes.
+void httpd_last_request(char *uri, size_t size, long *at_s);
+
 #endif

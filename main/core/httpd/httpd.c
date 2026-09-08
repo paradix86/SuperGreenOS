@@ -342,7 +342,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   char broker_url[128] = {0};
   char broker_clientid[128] = {0};
   char reset_history[128] = {0};
-  char ret[1200] = {0};
+  char ret[1400] = {0};
 
   getstr(BROKER_URL, broker_url, sizeof(broker_url) - 1);
   getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
@@ -352,7 +352,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"reset_history\":\"%s\",\"heap_free\":%lu,"
-      "\"heap_min_free\":%lu,\"heap_min_free_at\":%ld,\"heap_low_events\":%d,"
+      "\"heap_min_free\":%lu,\"heap_min_free_at\":%ld,\"heap_low_events\":%d,\"heap_min_ctx\":\"%s\","
       "\"uptime_s\":%ld,\"fs_used\":%u,\"fs_total\":%u,\"nvs_used\":%u,\"nvs_free\":%u,"
       "\"mqtt_stack_hwm\":%ld,\"time_valid\":%d,\"broker_url\":\"%s\","
       "\"broker_clientid\":\"%s\"}",
@@ -369,6 +369,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       heap_min_free,
       get_heap_min_free_at(),
       get_heap_low_events(),
+      get_heap_min_ctx(),
       uptime_s,
       (unsigned int)fs_used,
       (unsigned int)fs_total,

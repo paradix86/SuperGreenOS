@@ -30,6 +30,9 @@ void get_reset_history(char *dest, size_t len);
 // and number of times free heap dipped below 8 KB since boot (5 s sampling)
 long get_heap_min_free_at();
 int get_heap_low_events();
+// What was going on when the heap minimum was last lowered: last HTTP URI
+// and its age, MQTT state, free heap and largest free block right after.
+const char *get_heap_min_ctx();
 
 int on_set_reboot(int value);
 
