@@ -332,6 +332,8 @@ Verified live controller state included:
 - `SENSOR_HEALTH_LAST_ALERT = box_0_co2_stuck`
 - `SENSOR_HEALTH_STUCK_SAMPLES = 5`
 
+Since 2026-09-08 a box is reported stuck (`box_N_sensor_stuck`) only when every metric it has (temperature, humidity, VPD, CO2) stopped moving for `SENSOR_HEALTH_STUCK_SAMPLES` samples. Whole-degree temperature and humidity legitimately sit on the same value for an hour in a still room; VPD is kept at 0.01 kPa from the float readings and keeps moving while the sensor is alive, so only a frozen or unplugged sensor trips the alert. Older firmwares sent one alert per metric (`box_0_temp_stuck`, ...).
+
 ## MQTT and Home Assistant
 
 The legacy MQTT log stream remains unchanged, but the firmware now also publishes a Home Assistant-friendly channel.
@@ -395,7 +397,7 @@ Current state payload shape:
   "box_2_sensor_problem": "OFF",
   "sensor_health_enabled": "ON",
   "sensor_health_period_s": 60,
-  "sensor_health_last_alert": "box_0_temp_stuck"
+  "sensor_health_last_alert": "box_0_sensor_stuck"
 }
 ```
 

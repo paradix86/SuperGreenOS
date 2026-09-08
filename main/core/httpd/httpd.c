@@ -595,6 +595,11 @@ static esp_err_t kv_get_handler(httpd_req_t *req) {
     if (!kvs_mappings[i].getter) {
       continue;
     }
+    // Wi-Fi / AP passwords stay reachable one by one through /s (Alan's
+    // choice: no HTTP auth), but a bulk dump should not carry them along.
+    if (strstr(kvs_mappings[i].name, "PASSWORD") != NULL) {
+      continue;
+    }
     memset(value, 0, sizeof(value));
     kvs_mappings[i].getter(value, MAX_KVALUE_SIZE - 1);
     kv_puts(&o, first ? "\"" : ",\"");
