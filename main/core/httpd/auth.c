@@ -55,19 +55,27 @@ bool auth_request(httpd_req_t *req) {
   if (!hasstr(HTTPD_AUTH)) {
     return true;
   }
-  char auth[MAX_KVALUE_SIZE] = {0};
+  char *auth = malloc(MAX_KVALUE_SIZE);
+  if (!auth) return auth_failed(req);
   getstr(HTTPD_AUTH, auth, MAX_KVALUE_SIZE);
 
   if (strlen(auth) == 0) {
+    free(auth);
     return true;
   }
 
-  char reqAuth[MAX_KVALUE_SIZE] = {0};
+  char *reqAuth = malloc(MAX_KVALUE_SIZE);
+  if (!reqAuth) {
+    free(auth);
+    return auth_failed(req);
+  }
+  bool result = true;
   if(httpd_req_get_hdr_value_str(req, "Authorization", reqAuth, MAX_KVALUE_SIZE) != ESP_OK) {
-    return auth_failed(req);
+    result = false;
+  } else if (strlen(reqAuth) != 6 + strlen(auth) || strncmp(auth, &(reqAuth[6]), MAX_KVALUE_SIZE-6) != 0) {
+    result = false;
   }
-  if (strlen(reqAuth) != 6 + strlen(auth) || strncmp(auth, &(reqAuth[6]), MAX_KVALUE_SIZE-6) != 0) {
-    return auth_failed(req);
-  }
-  return true;
+  free(auth);
+  free(reqAuth);
+  return result ? true : auth_failed(req);
 }
