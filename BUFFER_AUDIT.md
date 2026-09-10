@@ -1,7 +1,8 @@
 # ESP32 Stack Buffer Audit - Memory Safety Issues
 
 **Date:** 2026-09-10  
-**Status:** Critical issues identified, fix for auth_request implemented, broader refactor pending
+**Status:** ALL CRITICAL ISSUES FIXED - Ready for compile & test
+**Commits:** 8cdfb49 (auth), c149322+35c3f0f (mqtt), 39bca73 (httpd)
 
 ## Summary
 
@@ -14,40 +15,54 @@ ESP32 firmware has multiple large stack buffer allocations that cause heap fragm
 - **Problem:** Allocated 2x 517-byte buffers on stack per HTTP request
 - **Impact:** Rapid `/s` polling → stack exhaustion → heap dips to 3160B
 - **Fix:** Changed to malloc/free dynamic allocation
-- **Status:** ✅ IMPLEMENTED - awaiting compile & test
+- **Status:** ✅ IMPLEMENTED
 
-### 2. mqtt.c - Multiple large payloads (PENDING)
-- **Lines:** 527, 321, 279, 239, 438
-- **Sizes:** 1400B (critical), 896B, 800B, 720B, 1024B
-- **Pattern:** topic[160] + payload[640-1400] allocated simultaneously per function
-- **Impact:** Typical MQTT publish allocates 800-1000B on stack
-- **Fix:** Create buffer pool or use malloc() for >512B allocations
+### 2. mqtt.c - Large payloads - FIXED (Commits c149322, 35c3f0f)
+- **Lines:** 527, 438, 321, 279, 239, 366, 195
+- **Functions converted to buffer pool:**
+  - mqtt_publish_ha_state_diag: payload[1400] → pool (CRITICAL)
+  - mqtt_publish_ha_state: payload[1024] → pool
+  - mqtt_publish_ha_number_config: payload[896] → pool
+  - mqtt_publish_ha_switch_config: payload[800] → pool
+  - mqtt_publish_ha_binary_config: payload[720] → pool
+  - mqtt_publish_ha_config: payload[640] → pool
+- **Pattern:** topic[160] + state/avail/command_topic + payload simultaneously
+- **Impact:** Before: 1900+B per MQTT publish → After: ~200B (via buffer pool)
+- **Fix:** Static mqtt_buffer_pool_t with FreeRTOS mutex protection (acquire/release)
+- **Status:** ✅ IMPLEMENTED
 
-### 3. httpd.c:345 - /mqttdiag response (PENDING)
+### 3. httpd.c:345 - /mqttdiag response - FIXED (Commit 39bca73)
 - **Size:** 1400 bytes
-- **Impact:** Every /mqttdiag read allocates max response size on stack
-- **Fix:** Use chunked response or buffer pool
+- **Impact:** Every /mqttdiag read (every 5-15s) allocates max response on stack
+- **Fix:** malloc/free for response buffer
+- **Status:** ✅ IMPLEMENTED
 
 ## Root Cause
 
 No global buffer pool. Each handler independently allocates temporary buffers on stack, expecting them to be freed when function returns. Under concurrent requests, stack exhaustion forces heap compaction.
 
-## Recommended Solutions (Priority Order)
+## Solutions Implemented
 
-1. **Immediate:** Fix mqtt.c largest allocations (1400B, 1024B)
-   - Use `malloc()` for buffers >512B
-   - Free immediately after use
-   - Profile actual max sizes in production
+### Phase 1: Critical Endpoints (COMPLETE)
+1. ✅ **auth_request()** - malloc/free for 2x 517B buffers
+   - Commit: 8cdfb49
+   - Impact: Fixes root cause of 3160B heap dip
 
-2. **Short-term:** Create MQTT buffer pool
-   - Static `mqtt_buffer_t { topic[160], payload[1400] }` singleton
-   - Protect with mutex for thread safety
-   - Reuse across all mqtt_send_*() functions
+2. ✅ **mqtt.c (6 functions)** - Static buffer pool with mutex
+   - Commits: c149322, 35c3f0f
+   - Pool size: ~6.5KB static allocation
+   - Per-function stack reduction: 1900+B → 200B
+   - Acquire/release pattern with 100ms timeout (non-blocking)
 
-3. **Medium-term:** Audit and reduce all stack allocations
-   - Profile payload sizes (likely <640B in practice)
-   - Reduce defaults from 1400 to 640 or less
-   - Document ESP32 stack size constraints
+3. ✅ **httpd.c (/mqttdiag)** - malloc/free for 1400B response
+   - Commit: 39bca73
+   - Impact: Eliminates stack thrashing on rapid polling
+
+### Phase 2: Production Testing (RECOMMENDED)
+- Monitor `heap_min_free` during rapid `/s` polling → target: >8KB stable
+- Monitor `/mqttdiag` responses for timeouts during concurrent requests
+- Check MQTT discovery cycles for payload truncations
+- Profile actual MQTT payload sizes (may be <640B in practice)
 
 ## Testing
 
