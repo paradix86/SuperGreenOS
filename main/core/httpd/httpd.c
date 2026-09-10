@@ -309,6 +309,12 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
     return 0;
   }
 
+  char *ret = malloc(1400);
+  if (!ret) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
   int32_t mqtt_stage = hasi32(MQTT_DIAG_KEY_STAGE) ? geti32(MQTT_DIAG_KEY_STAGE) : -1;
   int32_t mqtt_disc_idx = hasi32(MQTT_DIAG_KEY_DISC_IDX) ? geti32(MQTT_DIAG_KEY_DISC_IDX) : -1;
   int state = get_state();
@@ -342,7 +348,6 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   char broker_url[128] = {0};
   char broker_clientid[128] = {0};
   char reset_history[128] = {0};
-  char ret[1400] = {0};
 
   getstr(BROKER_URL, broker_url, sizeof(broker_url) - 1);
   getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
@@ -379,13 +384,14 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       time_valid,
       broker_url,
       broker_clientid);
-  if (written < 0 || (size_t)written >= sizeof(ret)) {
+  if (written < 0 || written >= 1400) {
     ESP_LOGE(SGO_LOG_NOSEND, "@HTTPD /mqttdiag JSON truncated (%d bytes)", written);
   }
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_send(req, ret, strlen(ret));
+  free(ret);
   return ESP_OK;
 }
 
