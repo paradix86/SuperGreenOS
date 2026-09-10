@@ -304,12 +304,14 @@ static esp_err_t get_ip_handler(httpd_req_t *req) {
   return ESP_OK;
 }
 
+#define MQTTDIAG_RET_SIZE 1400
+
 static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   if (auth_request(req) == false) {
     return 0;
   }
 
-  char *ret = malloc(1400);
+  char *ret = malloc(MQTTDIAG_RET_SIZE);
   if (!ret) {
     httpd_resp_send_500(req);
     return ESP_FAIL;
@@ -353,7 +355,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
   getstr(BROKER_CLIENTID, broker_clientid, sizeof(broker_clientid) - 1);
   get_reset_history(reset_history, sizeof(reset_history) - 1);
 
-  int written = snprintf(ret, sizeof(ret),
+  int written = snprintf(ret, MQTTDIAG_RET_SIZE,
       "{\"mqtt_stage\":%ld,\"mqtt_disc_idx\":%ld,\"state\":%d,"
       "\"wifi_status\":%d,\"mqtt_connected\":%d,\"n_restarts\":%d,"
       "\"ota_status\":%d,\"reset_reason\":%d,\"reset_history\":\"%s\",\"heap_free\":%lu,"
@@ -384,7 +386,7 @@ static esp_err_t mqttdiag_get_handler(httpd_req_t *req) {
       time_valid,
       broker_url,
       broker_clientid);
-  if (written < 0 || written >= 1400) {
+  if (written < 0 || written >= MQTTDIAG_RET_SIZE) {
     ESP_LOGE(SGO_LOG_NOSEND, "@HTTPD /mqttdiag JSON truncated (%d bytes)", written);
   }
 
