@@ -224,27 +224,24 @@ static int mqtt_publish_ha_config(
     const char *value_template,
     const char *unit,
     const char *device_class) {
-  char topic[160] = {0};
-  char payload[640] = {0};
-  char state_topic[MAX_KVALUE_SIZE] = {0};
-  char availability_topic[MAX_KVALUE_SIZE] = {0};
-  char device_name[64] = {0};
-  char unit_part[64] = {0};
-  char class_part[64] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return -1;
 
-  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
-  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
-  build_ha_device_name(device_name, sizeof(device_name), client_id);
-  snprintf(topic, sizeof(topic), "%s/sensor/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+  build_ha_state_topic(buf->state_topic, sizeof(buf->state_topic), client_id);
+  build_ha_availability_topic(buf->availability_topic, sizeof(buf->availability_topic), client_id);
+  build_ha_device_name(buf->device_name, sizeof(buf->device_name), client_id);
+  snprintf(buf->topic, sizeof(buf->topic), "%s/sensor/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
 
+  memset(buf->unit_part, 0, sizeof(buf->unit_part));
+  memset(buf->class_part, 0, sizeof(buf->class_part));
   if (unit && strlen(unit) != 0) {
-    snprintf(unit_part, sizeof(unit_part), ",\"unit_of_measurement\":\"%s\"", unit);
+    snprintf(buf->unit_part, sizeof(buf->unit_part), ",\"unit_of_measurement\":\"%s\"", unit);
   }
   if (device_class && strlen(device_class) != 0) {
-    snprintf(class_part, sizeof(class_part), ",\"device_class\":\"%s\"", device_class);
+    snprintf(buf->class_part, sizeof(buf->class_part), ",\"device_class\":\"%s\"", device_class);
   }
 
-  snprintf(payload, sizeof(payload),
+  snprintf(buf->payload, sizeof(buf->payload),
       "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
       "\"availability_topic\":\"%s\",\"value_template\":\"%s\"%s%s,"
       "\"device\":{\"identifiers\":[\"%s\"],\"name\":\"%s\","
@@ -252,14 +249,16 @@ static int mqtt_publish_ha_config(
       name,
       client_id,
       object_id,
-      state_topic,
-      availability_topic,
+      buf->state_topic,
+      buf->availability_topic,
       value_template,
-      unit_part,
-      class_part,
+      buf->unit_part,
+      buf->class_part,
       client_id,
-      device_name);
-  return mqtt_publish_message(topic, payload, 1);
+      buf->device_name);
+  int result = mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
+  return result;
 }
 
 static int mqtt_publish_ha_binary_config(
@@ -462,9 +461,9 @@ static bool mqtt_publish_ha_discovery(const char *client_id) {
 
 void mqtt_publish_ha_state() {
   char client_id[MAX_KVALUE_SIZE] = {0};
-  char topic[MAX_KVALUE_SIZE] = {0};
-  char payload[1024] = {0};
-  char alert[MAX_KVALUE_SIZE] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return;
+
   int sensor_health_status = 0;
   const char *sensor_health_status_text = NULL;
   const char *sensor_health_problem = NULL;
@@ -473,23 +472,25 @@ void mqtt_publish_ha_state() {
   const char *box_2_sensor_problem = NULL;
 
   if (!connected || client == NULL) {
+    mqtt_buffers_release();
     return;
   }
 
   get_broker_clientid(client_id, sizeof(client_id) - 1);
   if (strlen(client_id) == 0) {
+    mqtt_buffers_release();
     return;
   }
 
-  get_sensor_health_last_alert(alert, sizeof(alert) - 1);
+  get_sensor_health_last_alert(buf->alert, sizeof(buf->alert) - 1);
   sensor_health_status = get_sensor_health_status();
   sensor_health_status_text = sensor_health_status_to_text(sensor_health_status);
   sensor_health_problem = sensor_health_problem_to_text(sensor_health_status);
-  box_0_sensor_problem = box_sensor_problem_to_text(alert, 0);
-  box_1_sensor_problem = box_sensor_problem_to_text(alert, 1);
-  box_2_sensor_problem = box_sensor_problem_to_text(alert, 2);
-  build_ha_state_topic(topic, sizeof(topic), client_id);
-  snprintf(payload, sizeof(payload),
+  box_0_sensor_problem = box_sensor_problem_to_text(buf->alert, 0);
+  box_1_sensor_problem = box_sensor_problem_to_text(buf->alert, 1);
+  box_2_sensor_problem = box_sensor_problem_to_text(buf->alert, 2);
+  build_ha_state_topic(buf->topic, sizeof(buf->topic), client_id);
+  snprintf(buf->payload, sizeof(buf->payload),
       "{\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
       "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
       "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
@@ -522,8 +523,9 @@ void mqtt_publish_ha_state() {
       box_2_sensor_problem,
       get_sensor_health_enabled() ? "ON" : "OFF",
       (unsigned int)get_sensor_health_period_s(),
-      alert);
-  mqtt_publish_message(topic, payload, 1);
+      buf->alert);
+  mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
 }
 
 static mqtt_state_diag_mode_t mqtt_state_diag_mode_from_client_id(const char *client_id) {
