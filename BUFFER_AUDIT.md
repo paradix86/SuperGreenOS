@@ -1,8 +1,8 @@
 # ESP32 Stack Buffer Audit - Memory Safety Issues
 
 **Date:** 2026-09-10  
-**Status:** ALL CRITICAL ISSUES FIXED - Ready for compile & test
-**Commits:** 8cdfb49 (auth), c149322+35c3f0f (mqtt), 39bca73 (httpd)
+**Status:** ALL CRITICAL ISSUES FIXED - flashed as OTA 1789024847 on 2026-09-10 (firmware 5dfe013): heap_min_free 23068 B after 60 s rapid polling (was 3160 B), heap_low_events 0; 24 h check pending
+**Commits:** 8cdfb49 (auth), c149322+35c3f0f+5dfe013 (mqtt, incl. mqtt.c.template), 39bca73+5dfe013 (httpd), 8dd8c61 (cmd)
 
 ## Summary
 
