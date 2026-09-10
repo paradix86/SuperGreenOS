@@ -59,9 +59,9 @@ void execute_cmd(int length, const char *cmdData, bool remote) {
       }
     }
     if (remote == true) {
-      strcpy(&(cmdStr[length]), " -r 1");
+      snprintf(&(cmdStr[length]), MAX_CMD_LENGTH - length, " -r 1");
     } else {
-      strcpy(&(cmdStr[length]), " -r 0");
+      snprintf(&(cmdStr[length]), MAX_CMD_LENGTH - length, " -r 0");
     }
     xQueueSend(cmd, cmdStr, 0);
   }
