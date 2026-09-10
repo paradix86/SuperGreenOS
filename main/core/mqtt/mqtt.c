@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "sodium/utils.h"
 #include "mbedtls/sha256.h"
@@ -56,6 +57,22 @@ bool get_mqtt_connected() {
 static esp_mqtt_client_handle_t client;
 
 static QueueHandle_t cmd;
+
+// MQTT buffer pool: reduces stack allocation from 1900+ bytes per function to ~8KB static heap
+typedef struct {
+  char topic[MAX_KVALUE_SIZE];      // 517 bytes
+  char payload[1400];               // 1400 bytes
+  char state_topic[MAX_KVALUE_SIZE];    // 517 bytes
+  char availability_topic[MAX_KVALUE_SIZE];  // 517 bytes
+  char command_topic[MAX_KVALUE_SIZE];       // 517 bytes
+  char device_name[64];
+  char unit_part[64];
+  char class_part[64];
+  char alert[MAX_KVALUE_SIZE];      // 517 bytes
+} mqtt_buffer_pool_t;
+
+static mqtt_buffer_pool_t mqtt_buffers = {0};
+static SemaphoreHandle_t mqtt_buffers_mutex = NULL;
 
 static int CMD_MQTT_CONNECTED = 1;
 static int CMD_MQTT_PUBLISH_STATE = 4;  // 1..3 are taken (3 = CMD_MQTT_CHANGE_SCR_CHANNEL when hasScr)
@@ -137,6 +154,22 @@ static void build_ha_availability_topic(char *dest, size_t len, const char *clie
 
 static void build_ha_command_topic(char *dest, size_t len, const char *client_id, const char *command) {
   snprintf(dest, len, "%s/%s/command/%s", HA_TOPIC_PREFIX, client_id, command);
+}
+
+static mqtt_buffer_pool_t *mqtt_buffers_acquire() {
+  if (mqtt_buffers_mutex == NULL) {
+    mqtt_buffers_mutex = xSemaphoreCreateMutex();
+  }
+  if (xSemaphoreTake(mqtt_buffers_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    return &mqtt_buffers;
+  }
+  return NULL;
+}
+
+static void mqtt_buffers_release() {
+  if (mqtt_buffers_mutex != NULL) {
+    xSemaphoreGive(mqtt_buffers_mutex);
+  }
 }
 
 static int mqtt_publish_message(const char *topic, const char *payload, int retain) {
@@ -235,23 +268,20 @@ static int mqtt_publish_ha_binary_config(
     const char *name,
     const char *value_template,
     const char *device_class) {
-  char topic[160] = {0};
-  char payload[720] = {0};
-  char state_topic[MAX_KVALUE_SIZE] = {0};
-  char availability_topic[MAX_KVALUE_SIZE] = {0};
-  char device_name[64] = {0};
-  char class_part[64] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return -1;
 
-  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
-  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
-  build_ha_device_name(device_name, sizeof(device_name), client_id);
-  snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+  build_ha_state_topic(buf->state_topic, sizeof(buf->state_topic), client_id);
+  build_ha_availability_topic(buf->availability_topic, sizeof(buf->availability_topic), client_id);
+  build_ha_device_name(buf->device_name, sizeof(buf->device_name), client_id);
+  snprintf(buf->topic, sizeof(buf->topic), "%s/binary_sensor/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
 
+  memset(buf->class_part, 0, sizeof(buf->class_part));
   if (device_class && strlen(device_class) != 0) {
-    snprintf(class_part, sizeof(class_part), ",\"device_class\":\"%s\"", device_class);
+    snprintf(buf->class_part, sizeof(buf->class_part), ",\"device_class\":\"%s\"", device_class);
   }
 
-  snprintf(payload, sizeof(payload),
+  snprintf(buf->payload, sizeof(buf->payload),
       "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
       "\"availability_topic\":\"%s\",\"value_template\":\"%s\","
       "\"payload_on\":\"ON\",\"payload_off\":\"OFF\"%s,"
@@ -260,13 +290,15 @@ static int mqtt_publish_ha_binary_config(
       name,
       client_id,
       object_id,
-      state_topic,
-      availability_topic,
+      buf->state_topic,
+      buf->availability_topic,
       value_template,
-      class_part,
+      buf->class_part,
       client_id,
-      device_name);
-  return mqtt_publish_message(topic, payload, 1);
+      buf->device_name);
+  int result = mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
+  return result;
 }
 
 static int mqtt_publish_ha_switch_config(
@@ -275,20 +307,16 @@ static int mqtt_publish_ha_switch_config(
     const char *name,
     const char *command,
     const char *value_template) {
-  char topic[160] = {0};
-  char payload[800] = {0};
-  char state_topic[MAX_KVALUE_SIZE] = {0};
-  char availability_topic[MAX_KVALUE_SIZE] = {0};
-  char command_topic[MAX_KVALUE_SIZE] = {0};
-  char device_name[64] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return -1;
 
-  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
-  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
-  build_ha_command_topic(command_topic, sizeof(command_topic), client_id, command);
-  build_ha_device_name(device_name, sizeof(device_name), client_id);
-  snprintf(topic, sizeof(topic), "%s/switch/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+  build_ha_state_topic(buf->state_topic, sizeof(buf->state_topic), client_id);
+  build_ha_availability_topic(buf->availability_topic, sizeof(buf->availability_topic), client_id);
+  build_ha_command_topic(buf->command_topic, sizeof(buf->command_topic), client_id, command);
+  build_ha_device_name(buf->device_name, sizeof(buf->device_name), client_id);
+  snprintf(buf->topic, sizeof(buf->topic), "%s/switch/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
 
-  snprintf(payload, sizeof(payload),
+  snprintf(buf->payload, sizeof(buf->payload),
       "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
       "\"availability_topic\":\"%s\",\"command_topic\":\"%s\","
       "\"value_template\":\"%s\",\"payload_on\":\"ON\",\"payload_off\":\"OFF\","
@@ -298,13 +326,15 @@ static int mqtt_publish_ha_switch_config(
       name,
       client_id,
       object_id,
-      state_topic,
-      availability_topic,
-      command_topic,
+      buf->state_topic,
+      buf->availability_topic,
+      buf->command_topic,
       value_template,
       client_id,
-      device_name);
-  return mqtt_publish_message(topic, payload, 1);
+      buf->device_name);
+  int result = mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
+  return result;
 }
 
 static int mqtt_publish_ha_number_config(
@@ -317,25 +347,21 @@ static int mqtt_publish_ha_number_config(
     int max_value,
     int step,
     const char *unit) {
-  char topic[160] = {0};
-  char payload[896] = {0};
-  char state_topic[MAX_KVALUE_SIZE] = {0};
-  char availability_topic[MAX_KVALUE_SIZE] = {0};
-  char command_topic[MAX_KVALUE_SIZE] = {0};
-  char device_name[64] = {0};
-  char unit_part[64] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return -1;
 
-  build_ha_state_topic(state_topic, sizeof(state_topic), client_id);
-  build_ha_availability_topic(availability_topic, sizeof(availability_topic), client_id);
-  build_ha_command_topic(command_topic, sizeof(command_topic), client_id, command);
-  build_ha_device_name(device_name, sizeof(device_name), client_id);
-  snprintf(topic, sizeof(topic), "%s/number/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
+  build_ha_state_topic(buf->state_topic, sizeof(buf->state_topic), client_id);
+  build_ha_availability_topic(buf->availability_topic, sizeof(buf->availability_topic), client_id);
+  build_ha_command_topic(buf->command_topic, sizeof(buf->command_topic), client_id, command);
+  build_ha_device_name(buf->device_name, sizeof(buf->device_name), client_id);
+  snprintf(buf->topic, sizeof(buf->topic), "%s/number/%s/%s/config", HA_DISCOVERY_PREFIX, client_id, object_id);
 
+  memset(buf->unit_part, 0, sizeof(buf->unit_part));
   if (unit && strlen(unit) != 0) {
-    snprintf(unit_part, sizeof(unit_part), ",\"unit_of_measurement\":\"%s\"", unit);
+    snprintf(buf->unit_part, sizeof(buf->unit_part), ",\"unit_of_measurement\":\"%s\"", unit);
   }
 
-  snprintf(payload, sizeof(payload),
+  snprintf(buf->payload, sizeof(buf->payload),
       "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
       "\"availability_topic\":\"%s\",\"command_topic\":\"%s\","
       "\"value_template\":\"%s\",\"min\":%d,\"max\":%d,\"step\":%d,"
@@ -345,17 +371,19 @@ static int mqtt_publish_ha_number_config(
       name,
       client_id,
       object_id,
-      state_topic,
-      availability_topic,
-      command_topic,
+      buf->state_topic,
+      buf->availability_topic,
+      buf->command_topic,
       value_template,
       min_value,
       max_value,
       step,
-      unit_part,
+      buf->unit_part,
       client_id,
-      device_name);
-  return mqtt_publish_message(topic, payload, 1);
+      buf->device_name);
+  int result = mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
+  return result;
 }
 
 static int mqtt_publish_ha_button_config(
@@ -523,9 +551,9 @@ static mqtt_state_diag_mode_t mqtt_state_diag_mode_from_client_id(const char *cl
 }
 
 static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *client_id) {
-  char topic[MAX_KVALUE_SIZE] = {0};
-  char payload[1400] = {0};
-  char alert[MAX_KVALUE_SIZE] = {0};
+  mqtt_buffer_pool_t *buf = mqtt_buffers_acquire();
+  if (!buf) return;
+
   int sensor_health_status = 0;
   const char *sensor_health_status_text = NULL;
   const char *sensor_health_problem = NULL;
@@ -534,19 +562,20 @@ static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *
   const char *box_2_sensor_problem = NULL;
 
   if (!connected || client == NULL || client_id == NULL || strlen(client_id) == 0) {
+    mqtt_buffers_release();
     return;
   }
 
-  build_ha_state_topic(topic, sizeof(topic), client_id);
+  build_ha_state_topic(buf->topic, sizeof(buf->topic), client_id);
   if (mode == MQTT_STATE_DIAG_S4A) {
-    snprintf(payload, sizeof(payload), "{\"state\":%d}", get_state());
+    snprintf(buf->payload, sizeof(buf->payload), "{\"state\":%d}", get_state());
   } else if (mode == MQTT_STATE_DIAG_S4B) {
-    snprintf(payload, sizeof(payload),
+    snprintf(buf->payload, sizeof(buf->payload),
         "{\"state\":%d,\"box_0_temp\":%d}",
         get_state(),
         get_box_0_temp());
   } else if (mode == MQTT_STATE_DIAG_S4C) {
-    snprintf(payload, sizeof(payload),
+    snprintf(buf->payload, sizeof(buf->payload),
         "{\"state\":%d,\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
         "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
         "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
@@ -565,14 +594,14 @@ static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *
         (float)get_box_2_vpd() / 100.0f,
         (long)get_box_2_co2());
   } else {
-    get_sensor_health_last_alert(alert, sizeof(alert) - 1);
+    get_sensor_health_last_alert(buf->alert, sizeof(buf->alert) - 1);
     sensor_health_status = get_sensor_health_status();
     sensor_health_status_text = sensor_health_status_to_text(sensor_health_status);
     sensor_health_problem = sensor_health_problem_to_text(sensor_health_status);
-    box_0_sensor_problem = box_sensor_problem_to_text(alert, 0);
-    box_1_sensor_problem = box_sensor_problem_to_text(alert, 1);
-    box_2_sensor_problem = box_sensor_problem_to_text(alert, 2);
-    snprintf(payload, sizeof(payload),
+    box_0_sensor_problem = box_sensor_problem_to_text(buf->alert, 0);
+    box_1_sensor_problem = box_sensor_problem_to_text(buf->alert, 1);
+    box_2_sensor_problem = box_sensor_problem_to_text(buf->alert, 2);
+    snprintf(buf->payload, sizeof(buf->payload),
         "{\"state\":%d,\"box_0_temp\":%d,\"box_0_humi\":%d,\"box_0_vpd\":%.2f,"
         "\"box_0_co2\":%ld,\"box_1_temp\":%d,\"box_1_humi\":%d,"
         "\"box_1_vpd\":%.2f,\"box_1_co2\":%ld,\"box_2_temp\":%d,"
@@ -606,9 +635,10 @@ static void mqtt_publish_ha_state_diag(mqtt_state_diag_mode_t mode, const char *
         box_2_sensor_problem,
         get_sensor_health_enabled() ? "ON" : "OFF",
         (unsigned int)get_sensor_health_period_s(),
-        alert);
+        buf->alert);
   }
-  mqtt_publish_message(topic, payload, 1);
+  mqtt_publish_message(buf->topic, buf->payload, 1);
+  mqtt_buffers_release();
 }
 
 
