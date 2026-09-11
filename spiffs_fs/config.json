@@ -181,7 +181,7 @@
               "write": true,
               
               
-              "default": "/ControllerV3"
+              "default": "/ControllerV2.1"
             },
           
             {
@@ -2632,6 +2632,84 @@
                 "box": {
                   "index": 2,
                   "param": "timer_output"
+                },
+              
+              
+              "default": 0
+            },
+          
+            {
+              "core": false,
+              "name": "box_0_timer_manual_output",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "BOX_0_TIMER_MANUAL_OUTPUT",
+              "module": "timer",
+              "helper": "Box #1 manual output",
+              
+              "write": true,
+              
+                "array": {
+                  "name": "box",
+                  "len": 3,
+                  "index": 0,
+                  "param": "timer_manual_output"
+                },
+                "box": {
+                  "index": 0,
+                  "param": "timer_manual_output"
+                },
+              
+              
+              "default": 0
+            },
+          
+            {
+              "core": false,
+              "name": "box_1_timer_manual_output",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "BOX_1_TIMER_MANUAL_OUTPUT",
+              "module": "timer",
+              "helper": "Box #2 manual output",
+              
+              "write": true,
+              
+                "array": {
+                  "name": "box",
+                  "len": 3,
+                  "index": 1,
+                  "param": "timer_manual_output"
+                },
+                "box": {
+                  "index": 1,
+                  "param": "timer_manual_output"
+                },
+              
+              
+              "default": 0
+            },
+          
+            {
+              "core": false,
+              "name": "box_2_timer_manual_output",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "BOX_2_TIMER_MANUAL_OUTPUT",
+              "module": "timer",
+              "helper": "Box #3 manual output",
+              
+              "write": true,
+              
+                "array": {
+                  "name": "box",
+                  "len": 3,
+                  "index": 2,
+                  "param": "timer_manual_output"
+                },
+                "box": {
+                  "index": 2,
+                  "param": "timer_manual_output"
                 },
               
               
@@ -5267,7 +5345,7 @@
               "write": true,
               
               
-              "default": 0
+              "default": 1
             },
           
             {
@@ -5449,7 +5527,7 @@
                 },
               
               
-              "default": 8
+              "default": 0
             },
           
             {
@@ -5475,7 +5553,7 @@
                 },
               
               
-              "default": 8
+              "default": 0
             },
           
             {
@@ -5501,7 +5579,7 @@
                 },
               
               
-              "default": 8
+              "default": 0
             },
           
             {
@@ -5673,6 +5751,84 @@
                 },
               
               "default": 3
+            },
+          
+            {
+              "core": false,
+              "name": "motor_0_frequency",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "MOTOR_0_FREQUENCY",
+              "module": "motor",
+              
+              
+              "write": true,
+              
+                "array": {
+                  "name": "motor",
+                  "len": 3,
+                  "index": 0,
+                  "param": "frequency"
+                },
+                "motor": {
+                  "index": 0,
+                  "param": "frequency"
+                },
+              
+              
+              "default": 40000
+            },
+          
+            {
+              "core": false,
+              "name": "motor_1_frequency",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "MOTOR_1_FREQUENCY",
+              "module": "motor",
+              
+              
+              "write": true,
+              
+                "array": {
+                  "name": "motor",
+                  "len": 3,
+                  "index": 1,
+                  "param": "frequency"
+                },
+                "motor": {
+                  "index": 1,
+                  "param": "frequency"
+                },
+              
+              
+              "default": 40000
+            },
+          
+            {
+              "core": false,
+              "name": "motor_2_frequency",
+              "type": "integer",
+              "integer": true,
+              "caps_name": "MOTOR_2_FREQUENCY",
+              "module": "motor",
+              
+              
+              "write": true,
+              
+                "array": {
+                  "name": "motor",
+                  "len": 3,
+                  "index": 2,
+                  "param": "frequency"
+                },
+                "motor": {
+                  "index": 2,
+                  "param": "frequency"
+                },
+              
+              
+              "default": 40000
             },
           
             {

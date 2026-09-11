@@ -21,6 +21,12 @@ modules timer fields "\(k)_timer_output": _INT8 & _HTTP & {
   default: 0
 } for k, v in _box_conf
 
+modules timer fields "\(k)_timer_manual_output": _INT8 & _HTTP_RW & {
+  helper: "Box #\(k+1) manual output"
+  default: 0
+  write_cb: true
+} for k, v in _box_conf
+
 modules timer fields "\(k)_uva_timer_output": _INT8 & _HTTP & {
   helper: "Box #\(k+1) UVa timer output"
   default: 0
