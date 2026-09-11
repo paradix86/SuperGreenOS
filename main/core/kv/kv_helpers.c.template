@@ -25,6 +25,20 @@
 #include "kv.h"
 #include "../log/log.h"
 
+// One mutex for the whole RAM cache: each critical section below is a few
+// memory operations with no nested call, and the 291 per-key static mutexes
+// this replaced cost ~25 KB of DRAM on a chip that runs with ~35 KB free.
+static StaticSemaphore_t _kv_mutex_buffer;
+static SemaphoreHandle_t _kv_mutex;
+
+static inline void kv_lock() {
+  while (xSemaphoreTake(_kv_mutex, portMAX_DELAY) != pdPASS);
+}
+
+static inline void kv_unlock() {
+  xSemaphoreGive(_kv_mutex);
+}
+
 /*
  * [GENERATED]
  */
@@ -32,28 +46,26 @@
 <% Object.keys(modules).filter(m => modules[m].enabled).forEach(m => {
   Object.keys(modules[m].fields).filter(f => !modules[m].fields[f].disabled && !modules[m].fields[f].indir.enable).forEach(f => { f = modules[m].fields[f] %>
 
-  static StaticSemaphore_t _mutex_<%= f.name %>_buffer;
-  static SemaphoreHandle_t _mutex_<%= f.name %>; // TODO check RAM weight of creating so many semaphores :/
   static bool _<%= f.name %>_changed = true;
   static bool _<%= f.name %>_undefined = true;
 
   void reset_<%= f.name %>_changed() {
-    while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+    kv_lock();
     _<%= f.name %>_changed = false;
-    xSemaphoreGive(_mutex_<%= f.name %>);
+    kv_unlock();
   }
 
   bool is_<%= f.name %>_changed() {
-    while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+    kv_lock();
     bool v = _<%= f.name %>_changed;
-    xSemaphoreGive(_mutex_<%= f.name %>);
+    kv_unlock();
     return v;
   }
 
   bool is_<%= f.name %>_undefined() {
-    while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+    kv_lock();
     bool v = _<%= f.name %>_undefined;
-    xSemaphoreGive(_mutex_<%= f.name %>);
+    kv_unlock();
     return v;
   }
 
@@ -67,9 +79,9 @@
       <% if (f.nvs.enable) { %>
         return get<%= f.signedness %>i<%= f.intlen %>(<%= f.caps_name %>);
       <% } else { %>
-        while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+        kv_lock();
         int v = _<%= f.name %>;
-        xSemaphoreGive(_mutex_<%= f.name %>);
+        kv_unlock();
         return v;
       <% } %>
     }
@@ -79,17 +91,17 @@
         if (get<%= f.signedness %>i<%= f.intlen %>(<%= f.caps_name %>) == value) return;
         set<%= f.signedness %>i<%= f.intlen %>(<%= f.caps_name %>, value);
       <% } %>
-      while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+      kv_lock();
       <% if (!f.nvs.enable) { %>
         if (_<%= f.name %> == value) {
-          xSemaphoreGive(_mutex_<%= f.name %>);
+          kv_unlock();
           return;
         }
         _<%= f.name %> = value;
       <% } %>
       _<%= f.name %>_changed = true;
       _<%= f.name %>_undefined = false;
-      xSemaphoreGive(_mutex_<%= f.name %>);
+      kv_unlock();
     }
 
   <% } else { %>
@@ -103,9 +115,9 @@
       <% if (f.nvs.enable) { %>
         getstr(<%= f.caps_name %>, dest, len);
       <% } else { %>
-        while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+        kv_lock();
         strncpy(dest, _<%= f.name %>, len);
-        xSemaphoreGive(_mutex_<%= f.name %>);
+        kv_unlock();
       <% } %>
     }
 
@@ -117,10 +129,10 @@
       if (!strcmp(old_value, value)) return;
       setstr(<%= f.caps_name %>, value);
       <% } %>
-      while (xSemaphoreTake(_mutex_<%= f.name %>, portMAX_DELAY) != pdPASS);
+      kv_lock();
       <% if (!f.nvs.enable) { %>
       if (!strcmp(_<%= f.name %>, value)) {
-        xSemaphoreGive(_mutex_<%= f.name %>);
+        kv_unlock();
         return;
       }
       strncpy(_<%= f.name %>, value, strlen(value));
@@ -128,7 +140,7 @@
       <% } %>
       _<%= f.name %>_changed = true;
       _<%= f.name %>_undefined = false;
-      xSemaphoreGive(_mutex_<%= f.name %>);
+      kv_unlock();
     }
   <% } %>
 <% })}) %>
@@ -161,12 +173,9 @@
 <% })}) %>
 
 void init_helpers() {
-  <% Object.keys(modules).filter(m => modules[m].enabled).forEach(m => {
-    Object.keys(modules[m].fields).filter(f => !modules[m].fields[f].disabled && !modules[m].fields[f].indir.enable).forEach(f => { f = modules[m].fields[f]%>
-    if ((_mutex_<%= f.name %> = xSemaphoreCreateMutexStatic(&_mutex_<%= f.name %>_buffer)) == NULL) {
-      ESP_LOGI(SGO_LOG_NOSEND, "Could not create semaphore !!!");
-    }
-  <% })}) %>
+  if ((_kv_mutex = xSemaphoreCreateMutexStatic(&_kv_mutex_buffer)) == NULL) {
+    ESP_LOGE(SGO_LOG_NOSEND, "@KV could not create the cache mutex");
+  }
 }
 
 /*
