@@ -99,3 +99,11 @@ heap_free 37416, mqtt_stack_hwm 5668.
 
 Next (proposed, not done): one mutex for the KV RAM cache instead of 291
 (~25 KB of heap) in kv_helpers.c.template.
+
+## 2026-09-11 09:32 - OTA 1789111856: single KV mutex (commit d5df41a)
+
+291 static per-key mutexes -> 1. firmware.bin 1064160 -> 1023248 B.
+Before (OTA 1789110379, 10 min uptime): heap_free 38176, heap_min 23452 (a
+Wi-Fi burst already capped by the 16 RX buffers). After boot on 1789111856:
+heap_free 65440, heap_min 56464, mqtt_stack_hwm 5676, box and MQTT normal.
+Baseline free heap went from ~34 KB (2026-09-10) to ~65 KB.
