@@ -83,3 +83,19 @@ Without these fixes, controllers will experience silent heap exhaustion crashes 
 - Under network stress (MQTT retransmits)
 - With multiple concurrent HTTP clients
 - Without serial port for debugging
+
+## 2026-09-11 - 24 h verdict on OTA 1789024847 and follow-up OTA 1789110379
+
+Log: `C:\tmp\heap_24h.log` (every 5 min, 09:30-16:55, then 23.5 h uptime read live).
+No reboot, `/s` gone from the dip context, heap ~34 KB. One dip: 3252 B at
+uptime 14305 s, last HTTP request (`/dash`, the app's 15 s poll) 4 s old,
+largest free block 27.7 KB of 35.6 KB at capture -> many small allocations
+outside HTTP, i.e. a Wi-Fi RX buffer burst (32 x 1.6 KB allowed) on a 34 KB
+baseline. Not TLS (broker mqtt://, OTA idle).
+
+Fix (commit 4f3c805, OTA 1789110379 flashed 09:21): WIFI_DYNAMIC_RX_BUFFER_NUM
+32 -> 16, MQTT task stack 16384 -> 12288 (HWM 9764 B unused). After boot:
+heap_free 37416, mqtt_stack_hwm 5668.
+
+Next (proposed, not done): one mutex for the KV RAM cache instead of 291
+(~25 KB of heap) in kv_helpers.c.template.
