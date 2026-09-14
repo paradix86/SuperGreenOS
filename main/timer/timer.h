@@ -31,5 +31,6 @@ void refresh_timer();
 /* BLE callbacks */
 
 int on_set_box_timer_type(int boxId, int value);
+int on_set_box_timer_boost_s(int boxId, int value);
 
 #endif

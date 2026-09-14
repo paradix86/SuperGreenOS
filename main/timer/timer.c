@@ -22,6 +22,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "esp_timer.h"
 
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
@@ -39,7 +40,18 @@ typedef enum {
   CMD_REFRESH,
 } timer_cmd;
 
+/* Longest boost accepted, matching the 60 min the app offers. A cap is what
+ * stops a bogus or hand-written value from pinning the light to full for days. */
+#define BOX_TIMER_BOOST_MAX_S 3600
+
 static QueueHandle_t cmd;
+
+/* Deadline of each box's boost, in microseconds since boot (0 = no boost).
+ * Kept here rather than derived from the KV value so the countdown follows real
+ * time instead of however often this task happens to wake up. Like
+ * BOX_N_TIMER_BOOST_S itself this lives in RAM only: a reboot drops the boost
+ * and the box goes back to its schedule. */
+static int64_t boost_until[N_BOX] = {0};
 
 static void timer_task(void *param);
 static void stop(int boxId, enum timer t);
@@ -117,6 +129,22 @@ static void timer_task(void *param) {
           season_task(i);
           break;
       }
+
+      /* A boost overrides the output the mode task just computed, and nothing
+       * else: the box stays in its own timer type, so when the boost runs out
+       * the next tick recomputes the real output on its own - there is no
+       * saved state to restore and no way to end up stuck. */
+      if (boost_until[i] > 0) {
+        int64_t left_us = boost_until[i] - esp_timer_get_time();
+        if (left_us > 0) {
+          set_box_timer_output(i, 100);
+          set_box_timer_boost_s(i, (left_us + 999999) / 1000000);
+        } else {
+          boost_until[i] = 0;
+          set_box_timer_boost_s(i, 0);
+          ESP_LOGI(SGO_LOG_NOSEND, "@TIMER_%d boost expired", i);
+        }
+      }
     }
     if (c == CMD_REFRESH) {
       refresh_led(-1, -1);
@@ -146,5 +174,19 @@ int on_set_box_timer_type(int boxId, int value) {
     set_all_duty(boxId, 0, -1);
   }
   refresh_led(boxId, -1);
+  return value;
+}
+
+int on_set_box_timer_boost_s(int boxId, int value) {
+  if (value < 0) value = 0;
+  if (value > BOX_TIMER_BOOST_MAX_S) value = BOX_TIMER_BOOST_MAX_S;
+
+  set_box_timer_boost_s(boxId, value);
+  boost_until[boxId] = value > 0 ? esp_timer_get_time() + (int64_t)value * 1000000 : 0;
+  ESP_LOGI(SGO_LOG_NOSEND, "@TIMER_%d boost set to %ds", boxId, value);
+
+  /* Wake the task so the light follows immediately instead of on its next
+   * second, and so writing 0 ends the boost right away. */
+  refresh_timer();
   return value;
 }

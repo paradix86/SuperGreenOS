@@ -4156,12 +4156,12 @@
                     "valve_ref": 48,
                     "valve_ref_on": 48
                 },
-                "0_timer_manual_output": {
-                    "name": "box_0_timer_manual_output",
+                "0_timer_boost_s": {
+                    "name": "box_0_timer_boost_s",
                     "remote": true,
                     "type": "integer",
                     "nosend": false,
-                    "helper": "Box #1 manual output",
+                    "helper": "",
                     "dump_freq": 60,
                     "nvs": {
                         "enable": false,
@@ -4181,17 +4181,17 @@
                     "write_cb": true,
                     "disabled": false,
                     "signedness": "",
-                    "intlen": 8,
-                    "suffix": "0_timer_manual_output",
-                    "caps_name": "BOX_0_TIMER_MANUAL_OUTPUT",
+                    "intlen": 16,
+                    "suffix": "0_timer_boost_s",
+                    "caps_name": "BOX_0_TIMER_BOOST_S",
                     "default": 0
                 },
-                "1_timer_manual_output": {
-                    "name": "box_1_timer_manual_output",
+                "1_timer_boost_s": {
+                    "name": "box_1_timer_boost_s",
                     "remote": true,
                     "type": "integer",
                     "nosend": false,
-                    "helper": "Box #2 manual output",
+                    "helper": "",
                     "dump_freq": 60,
                     "nvs": {
                         "enable": false,
@@ -4211,17 +4211,17 @@
                     "write_cb": true,
                     "disabled": false,
                     "signedness": "",
-                    "intlen": 8,
-                    "suffix": "1_timer_manual_output",
-                    "caps_name": "BOX_1_TIMER_MANUAL_OUTPUT",
+                    "intlen": 16,
+                    "suffix": "1_timer_boost_s",
+                    "caps_name": "BOX_1_TIMER_BOOST_S",
                     "default": 0
                 },
-                "2_timer_manual_output": {
-                    "name": "box_2_timer_manual_output",
+                "2_timer_boost_s": {
+                    "name": "box_2_timer_boost_s",
                     "remote": true,
                     "type": "integer",
                     "nosend": false,
-                    "helper": "Box #3 manual output",
+                    "helper": "",
                     "dump_freq": 60,
                     "nvs": {
                         "enable": false,
@@ -4241,9 +4241,9 @@
                     "write_cb": true,
                     "disabled": false,
                     "signedness": "",
-                    "intlen": 8,
-                    "suffix": "2_timer_manual_output",
-                    "caps_name": "BOX_2_TIMER_MANUAL_OUTPUT",
+                    "intlen": 16,
+                    "suffix": "2_timer_boost_s",
+                    "caps_name": "BOX_2_TIMER_BOOST_S",
                     "default": 0
                 },
                 "0_uva_timer_output": {

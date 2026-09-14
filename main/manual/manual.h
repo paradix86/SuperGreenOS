@@ -23,6 +23,4 @@ void start_manual(int boxId);
 void stop_manual(int boxId);
 void manual_task(int boxId);
 
-int on_set_box_timer_manual_output(int boxId, int value);
-
 #endif

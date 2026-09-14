@@ -2640,12 +2640,12 @@
           
             {
               "core": false,
-              "name": "box_0_timer_manual_output",
+              "name": "box_0_timer_boost_s",
               "type": "integer",
               "integer": true,
-              "caps_name": "BOX_0_TIMER_MANUAL_OUTPUT",
+              "caps_name": "BOX_0_TIMER_BOOST_S",
               "module": "timer",
-              "helper": "Box #1 manual output",
+              
               
               "write": true,
               
@@ -2653,11 +2653,11 @@
                   "name": "box",
                   "len": 3,
                   "index": 0,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
                 "box": {
                   "index": 0,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
               
               
@@ -2666,12 +2666,12 @@
           
             {
               "core": false,
-              "name": "box_1_timer_manual_output",
+              "name": "box_1_timer_boost_s",
               "type": "integer",
               "integer": true,
-              "caps_name": "BOX_1_TIMER_MANUAL_OUTPUT",
+              "caps_name": "BOX_1_TIMER_BOOST_S",
               "module": "timer",
-              "helper": "Box #2 manual output",
+              
               
               "write": true,
               
@@ -2679,11 +2679,11 @@
                   "name": "box",
                   "len": 3,
                   "index": 1,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
                 "box": {
                   "index": 1,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
               
               
@@ -2692,12 +2692,12 @@
           
             {
               "core": false,
-              "name": "box_2_timer_manual_output",
+              "name": "box_2_timer_boost_s",
               "type": "integer",
               "integer": true,
-              "caps_name": "BOX_2_TIMER_MANUAL_OUTPUT",
+              "caps_name": "BOX_2_TIMER_BOOST_S",
               "module": "timer",
-              "helper": "Box #3 manual output",
+              
               
               "write": true,
               
@@ -2705,11 +2705,11 @@
                   "name": "box",
                   "len": 3,
                   "index": 2,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
                 "box": {
                   "index": 2,
-                  "param": "timer_manual_output"
+                  "param": "timer_boost_s"
                 },
               
               

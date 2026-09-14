@@ -20,15 +20,9 @@
 
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
-#include "../led/led.h"
-#include "../timer/timer.h"
-
-#define min(a, b) (((a) < (b)) ? (a) : (b))
-#define max(a, b) (((a) > (b)) ? (a) : (b))
 
 void start_manual(int boxId) {
   ESP_LOGI(SGO_LOG_NOSEND, "@MANUAL_%d start_manual", boxId);
-  manual_task(boxId);
 }
 
 void stop_manual(int boxId) {
@@ -36,18 +30,8 @@ void stop_manual(int boxId) {
   set_box_timer_output(boxId, 0);
 }
 
-// Manual mode has no schedule of its own: the LED output is whatever was last
-// written to BOX_N_TIMER_MANUAL_OUTPUT (0 until the app boosts it).
+// Manual mode has no schedule: whoever owns the box drives LED_N_DUTY directly
+// and the mixer deliberately leaves these boxes alone (see mixer_task), so
+// there is nothing to recompute here every second.
 void manual_task(int boxId) {
-  set_box_timer_output(boxId, get_box_timer_manual_output(boxId));
-}
-
-int on_set_box_timer_manual_output(int boxId, int value) {
-  value = min(100, max(value, 0));
-  set_box_timer_manual_output(boxId, value);
-  if (get_box_timer_type(boxId) == TIMER_MANUAL) {
-    manual_task(boxId);
-    refresh_led(boxId, -1);
-  }
-  return value;
 }

@@ -21,8 +21,10 @@ modules timer fields "\(k)_timer_output": _INT8 & _HTTP & {
   default: 0
 } for k, v in _box_conf
 
-modules timer fields "\(k)_timer_manual_output": _INT8 & _HTTP_RW & {
-  helper: "Box #\(k+1) manual output"
+// Seconds left on a temporary "boost the light to full" request. Deliberately
+// not _NVS: a reboot must drop the boost and hand the box back to its schedule,
+// never leave it stuck in whatever the boost was doing.
+modules timer fields "\(k)_timer_boost_s": _INT16 & _HTTP_RW & {
   default: 0
   write_cb: true
 } for k, v in _box_conf
