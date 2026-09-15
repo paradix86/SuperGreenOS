@@ -522,29 +522,47 @@ static bool mqtt_discovery_step(int32_t idx, int msg_id, bool do_pause) {
   return true;
 }
 
-/* The controllable light-schedule entities exposed to Home Assistant: the on and
- * off hour of each box. One table drives all four touch points below (discovery,
- * subscribe, command handling, and the value read back into the state payload),
- * so an entity cannot end up half-wired - advertised but not subscribed, or
- * settable but never echoed back. The setter is the plain KV setter, which is
- * what the HTTP path calls too (these keys have no write_cb). The hours only take
- * effect while the box is in the on/off timer type; in manual or season mode they
- * are stored but unused, exactly as when set from the app. */
+/* The controllable per-box numbers exposed to Home Assistant. One table drives
+ * all four touch points below (discovery, subscribe, command handling, and the
+ * value read back into the state payload), so an entity cannot end up half-wired
+ * - advertised but not subscribed, or settable but never echoed back.
+ *
+ * The setter is the plain KV setter and the value is clamped to [min,max] here.
+ * For the blower bounds this deliberately skips the hand-written write_cb
+ * (on_set_box_blower_min/max), whose only extra effect is to wake the blower task
+ * for an immediate refresh - blower_task re-reads min/max on its own every loop
+ * (its queue wait times out after 10 s), and motor_task then re-reads the duty on
+ * its own ~10 s loop, so the bound reaches the motor within ~20 s worst case
+ * without the refresh, just not on the same tick. Doing it this way keeps mqtt.c
+ * free of a dependency on the blower module (this template is also compiled for
+ * screen builds, which have no blower).
+ *
+ * The hours only take effect while the box is in the on/off timer type; in manual
+ * or season mode they are stored but unused, exactly as when set from the app. */
 typedef struct {
   const char *object_id;       /* also the command-topic suffix and the state field name */
   const char *name;            /* Home Assistant display name */
   void (*set)(int8_t value);   /* plain KV setter, e.g. set_box_0_on_hour */
-} ha_box_hour_t;
+  int min;                     /* inclusive range advertised to HA and clamped on write */
+  int max;
+  const char *unit;            /* HA unit_of_measurement, "" for none */
+} ha_box_number_t;
 
-static const ha_box_hour_t HA_BOX_HOURS[] = {
-  {"box_0_on_hour",  "Box 1 Lights On Hour",  set_box_0_on_hour},
-  {"box_0_off_hour", "Box 1 Lights Off Hour", set_box_0_off_hour},
-  {"box_1_on_hour",  "Box 2 Lights On Hour",  set_box_1_on_hour},
-  {"box_1_off_hour", "Box 2 Lights Off Hour", set_box_1_off_hour},
-  {"box_2_on_hour",  "Box 3 Lights On Hour",  set_box_2_on_hour},
-  {"box_2_off_hour", "Box 3 Lights Off Hour", set_box_2_off_hour},
+static const ha_box_number_t HA_BOX_NUMBERS[] = {
+  {"box_0_on_hour",    "Box 1 Lights On Hour",  set_box_0_on_hour,    0,  23, ""},
+  {"box_0_off_hour",   "Box 1 Lights Off Hour", set_box_0_off_hour,   0,  23, ""},
+  {"box_1_on_hour",    "Box 2 Lights On Hour",  set_box_1_on_hour,    0,  23, ""},
+  {"box_1_off_hour",   "Box 2 Lights Off Hour", set_box_1_off_hour,   0,  23, ""},
+  {"box_2_on_hour",    "Box 3 Lights On Hour",  set_box_2_on_hour,    0,  23, ""},
+  {"box_2_off_hour",   "Box 3 Lights Off Hour", set_box_2_off_hour,   0,  23, ""},
+  {"box_0_blower_min", "Box 1 Blower Min",      set_box_0_blower_min, 0, 100, "%"},
+  {"box_0_blower_max", "Box 1 Blower Max",      set_box_0_blower_max, 0, 100, "%"},
+  {"box_1_blower_min", "Box 2 Blower Min",      set_box_1_blower_min, 0, 100, "%"},
+  {"box_1_blower_max", "Box 2 Blower Max",      set_box_1_blower_max, 0, 100, "%"},
+  {"box_2_blower_min", "Box 3 Blower Min",      set_box_2_blower_min, 0, 100, "%"},
+  {"box_2_blower_max", "Box 3 Blower Max",      set_box_2_blower_max, 0, 100, "%"},
 };
-#define HA_BOX_HOURS_COUNT (sizeof(HA_BOX_HOURS) / sizeof(HA_BOX_HOURS[0]))
+#define HA_BOX_NUMBERS_COUNT (sizeof(HA_BOX_NUMBERS) / sizeof(HA_BOX_NUMBERS[0]))
 
 static bool mqtt_publish_ha_discovery(const char *client_id) {
   mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_START);
@@ -571,16 +589,17 @@ static bool mqtt_publish_ha_discovery(const char *client_id) {
   if (!mqtt_discovery_step(19, mqtt_publish_ha_binary_config(client_id, "box_2_sensor_problem", "Box 3 Sensor Problem", "{{ value_json.box_2_sensor_problem }}", "problem"), true)) return false;
   if (!mqtt_discovery_step(20, mqtt_publish_ha_switch_config(client_id, "sensor_health_enabled", "Sensor Health Enabled", "sensor_health_enabled", "{{ value_json.sensor_health_enabled }}"), true)) return false;
   if (!mqtt_discovery_step(21, mqtt_publish_ha_number_config(client_id, "sensor_health_period_s", "Sensor Health Period", "sensor_health_period_s", "{{ value_json.sensor_health_period_s }}", 5, 3600, 1, "s"), true)) return false;
-  for (size_t i = 0; i < HA_BOX_HOURS_COUNT; i++) {
+  for (size_t i = 0; i < HA_BOX_NUMBERS_COUNT; i++) {
     char value_template[64] = {0};
-    snprintf(value_template, sizeof(value_template), "{{ value_json.%s }}", HA_BOX_HOURS[i].object_id);
+    snprintf(value_template, sizeof(value_template), "{{ value_json.%s }}", HA_BOX_NUMBERS[i].object_id);
     if (!mqtt_discovery_step((int)(22 + i),
-            mqtt_publish_ha_number_config(client_id, HA_BOX_HOURS[i].object_id, HA_BOX_HOURS[i].name,
-                HA_BOX_HOURS[i].object_id, value_template, 0, 23, 1, ""),
+            mqtt_publish_ha_number_config(client_id, HA_BOX_NUMBERS[i].object_id, HA_BOX_NUMBERS[i].name,
+                HA_BOX_NUMBERS[i].object_id, value_template, HA_BOX_NUMBERS[i].min, HA_BOX_NUMBERS[i].max, 1,
+                HA_BOX_NUMBERS[i].unit),
             true)) return false;
   }
-  if (!mqtt_discovery_step((int)(22 + HA_BOX_HOURS_COUNT), mqtt_publish_ha_button_config(client_id, "reboot", "Reboot", "reboot"), true)) return false;
-  if (!mqtt_discovery_step((int)(23 + HA_BOX_HOURS_COUNT), mqtt_publish_ha_button_config(client_id, "ota_start", "Start OTA", "ota_start"), false)) return false;
+  if (!mqtt_discovery_step((int)(22 + HA_BOX_NUMBERS_COUNT), mqtt_publish_ha_button_config(client_id, "reboot", "Reboot", "reboot"), true)) return false;
+  if (!mqtt_discovery_step((int)(23 + HA_BOX_NUMBERS_COUNT), mqtt_publish_ha_button_config(client_id, "ota_start", "Start OTA", "ota_start"), false)) return false;
 
   mqtt_diag_set_stage(MQTT_DIAG_STAGE_DISCOVERY_DONE);
   return true;
@@ -632,6 +651,9 @@ void mqtt_publish_ha_state() {
       "\"box_0_on_hour\":%d,\"box_0_off_hour\":%d,"
       "\"box_1_on_hour\":%d,\"box_1_off_hour\":%d,"
       "\"box_2_on_hour\":%d,\"box_2_off_hour\":%d,"
+      "\"box_0_blower_min\":%d,\"box_0_blower_max\":%d,"
+      "\"box_1_blower_min\":%d,\"box_1_blower_max\":%d,"
+      "\"box_2_blower_min\":%d,\"box_2_blower_max\":%d,"
       "\"sensor_health_last_alert\":\"%s\"}",
       get_box_0_temp(),
       get_box_0_humi(),
@@ -656,6 +678,9 @@ void mqtt_publish_ha_state() {
       get_box_0_on_hour(), get_box_0_off_hour(),
       get_box_1_on_hour(), get_box_1_off_hour(),
       get_box_2_on_hour(), get_box_2_off_hour(),
+      get_box_0_blower_min(), get_box_0_blower_max(),
+      get_box_1_blower_min(), get_box_1_blower_max(),
+      get_box_2_blower_min(), get_box_2_blower_max(),
       buf->alert);
   mqtt_publish_message(buf->topic, buf->payload, 1);
   mqtt_buffers_release();
@@ -813,8 +838,8 @@ static void subscribe_cmd() {
   esp_mqtt_client_subscribe(client, topic, 1);
   build_ha_command_topic(topic, sizeof(topic), client_id, "sensor_health_period_s");
   esp_mqtt_client_subscribe(client, topic, 1);
-  for (size_t i = 0; i < HA_BOX_HOURS_COUNT; i++) {
-    build_ha_command_topic(topic, sizeof(topic), client_id, HA_BOX_HOURS[i].object_id);
+  for (size_t i = 0; i < HA_BOX_NUMBERS_COUNT; i++) {
+    build_ha_command_topic(topic, sizeof(topic), client_id, HA_BOX_NUMBERS[i].object_id);
     esp_mqtt_client_subscribe(client, topic, 1);
   }
 }
@@ -881,12 +906,12 @@ static void parse_ha_command(esp_mqtt_event_handle_t event) {
     return;
   }
 
-  for (size_t i = 0; i < HA_BOX_HOURS_COUNT; i++) {
-    build_ha_command_topic(expected, sizeof(expected), client_id, HA_BOX_HOURS[i].object_id);
+  for (size_t i = 0; i < HA_BOX_NUMBERS_COUNT; i++) {
+    build_ha_command_topic(expected, sizeof(expected), client_id, HA_BOX_NUMBERS[i].object_id);
     if (strcmp(topic, expected) == 0) {
-      int hour = atoi(payload);
-      if (hour >= 0 && hour <= 23) {
-        HA_BOX_HOURS[i].set((int8_t)hour);
+      int value = atoi(payload);
+      if (value >= HA_BOX_NUMBERS[i].min && value <= HA_BOX_NUMBERS[i].max) {
+        HA_BOX_NUMBERS[i].set((int8_t)value);
         mqtt_request_state_publish();
       }
       return;
