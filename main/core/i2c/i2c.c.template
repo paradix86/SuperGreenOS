@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include "i2c.h"
 #include "driver/i2c.h"
+#include "esp_task_wdt.h"
 
 #include "../kv/kv.h"
 #include "../log/log.h"
@@ -33,13 +34,22 @@
 
 static void loop_devices(int i2cId) {
   <% Object.keys(modules).filter(m => modules[m].enabled).filter(m => modules[m].i2c).forEach(m => { %>
+  esp_task_wdt_reset();
   loop_<%= modules[m].name %>(i2cId);
   vTaskDelay(1000 / portTICK_RATE_MS);
   <% }) %>
 }
 
+/* Fed from inside loop_devices as well as from the loop below, because one pass
+ * of this task is not short: every sensor module on every enabled bus waits a
+ * second of its own, so three modules on three buses already spend ~9 s before
+ * the 2 s tail - close enough to the 30 s CONFIG_TASK_WDT_TIMEOUT_S that a slow
+ * bus could trip a panic reboot on a controller that is working fine. Resetting
+ * per module keeps the gap at roughly one module's read plus its delay. */
 void i2c_task(void *param) {
+  esp_task_wdt_add(NULL);
   while(true) {
+    esp_task_wdt_reset();
     <% Array(modules.i2c.array_len).fill().forEach((v, i) => { %>
     if (get_i2c_enabled(<%= i %>)) {
       loop_devices(<%= i %>);

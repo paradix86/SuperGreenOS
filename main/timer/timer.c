@@ -23,6 +23,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 
 #include "../core/kv/kv.h"
 #include "../core/log/log.h"
@@ -106,7 +107,15 @@ static void start(int boxId, enum timer t) {
 static void timer_task(void *param) {
   timer_cmd c = CMD_NO_ACTION;
 
+  /* This task decides every box's light output once a second. If it ever stops
+   * feeding the watchdog the lights are frozen wherever they happen to be, with
+   * nothing else to notice - so let the watchdog reboot us instead. One pass is
+   * at most the 1 s queue wait plus a handful of KV reads, far under the 30 s
+   * CONFIG_TASK_WDT_TIMEOUT_S. */
+  esp_task_wdt_add(NULL);
+
   while (1) {
+    esp_task_wdt_reset();
     for (int i = 0; i < N_BOX; ++i) {
       if (get_box_enabled(i) != 1) {
         set_box_timer_output(i, 0);

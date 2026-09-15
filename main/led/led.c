@@ -27,6 +27,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "esp_err.h"
+#include "esp_task_wdt.h"
 #include "driver/ledc.h"
 
 #include "../core/kv/kv.h"
@@ -109,7 +110,14 @@ static void led_task(void *param) {
 
   cmd_refresh_led c;
 
+  /* Last stage of the light path: whatever the timer and the mixer decided only
+   * reaches the LEDs from here, so a hang leaves them stuck at their last duty.
+   * One pass is at most the 1 s queue wait plus the fade delay below, well
+   * inside the 30 s CONFIG_TASK_WDT_TIMEOUT_S. */
+  esp_task_wdt_add(NULL);
+
   while(1) {
+    esp_task_wdt_reset();
     if (!xQueueReceive(cmd, &c, 1000 / portTICK_PERIOD_MS)) {
       c.box_id = -1;
       c.led_id = -1;
